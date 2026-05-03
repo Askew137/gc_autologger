@@ -72,4 +72,4 @@ Instead of pasting "GCCodes", you can put any file containing GC codes (.gpx, .l
 ### Notes
 
 - Ensure valid credentials are provided in `InputData.json`.
-- Make sure `GCCodes` contains comma-separated geocache codes or the brackets are left empty.
+- Make sure `GCCodes` contains comma-separated geocache codes or the "" are left empty.
