@@ -7,7 +7,61 @@ import re
 
 def main():
     print("AutoLogger started")
-    Username, Password, GCCodes, LogText, DoScreenshots, Date, Mode, ShowScreen = readConfig()
+    Username, Password, GCCodes, templates, ShowScreen = readConfig()
+
+    mode_options = [
+        "FOUND",
+        "DNF",
+        "NOTE",
+        "NEEDS_OWNER_ATTENTION",
+        "NEEDS_REVIEWER_ATTENTION",
+        "IGNORE"
+    ]
+    print("\nVyberte mód:")
+    for i, option in enumerate(mode_options, 1):
+        print(f"{i}. {option}")
+    
+    while True:
+        try:
+            choice = int(input("Zadejte číslo módu: ").strip())
+            if 1 <= choice <= len(mode_options):
+                Mode = mode_options[choice - 1]
+                break
+            else:
+                print("Neplatná volba. Zadejte číslo ze seznamu.")
+        except ValueError:
+            print("Neplatný vstup. Zadejte číslo.")
+
+    Date = None
+    LogText = ""
+    if Mode != "IGNORE":
+        Date = input("Zadejte datum [YYYY-MM-DD] (or press enter to insert today): ").strip()
+        if not Date:
+            Date = datetime.date.today().strftime("%Y-%m-%d")
+            
+        print("\nVyberte text logu:")
+        print("1. [New log]")
+        for i, t in enumerate(templates, 2):
+            words = t.split()
+            if len(words) <= 6:
+                preview = " ".join(words)
+            else:
+                preview = " ".join(words[:5]) + " (***) " + words[-1]
+            print(f"{i}. {preview}")
+            
+        while True:
+            try:
+                choice = int(input("Zadejte číslo textu: ").strip())
+                if choice == 1:
+                    LogText = input("Zadejte nový text logu: ").strip()
+                    break
+                elif 2 <= choice <= len(templates) + 1:
+                    LogText = templates[choice - 2]
+                    break
+                else:
+                    print("Neplatná volba. Zadejte číslo ze seznamu.")
+            except ValueError:
+                print("Neplatný vstup. Zadejte číslo.")
 
     if Mode == "NEEDS_REVIEWER_ATTENTION":
         print("\n\033[93m⚠️ VAROVÁNÍ: Vybrali jste hromadné odesílání logu 'Vyžaduje pozornost reviewera'.\033[0m")
@@ -39,12 +93,12 @@ def main():
         print(f"Celkem keší k zpracování: {len(GCCodes)}")
 
         if Mode in ["LOG", "FOUND", "DNF", "NOTE", "NEEDS_OWNER_ATTENTION", "NEEDS_REVIEWER_ATTENTION"]:
-            LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode)
+            LogCaches(page, GCCodes, LogText, Date, Language, Mode)
         elif Mode == "IGNORE":
-            PutToIgnoreList(page, GCCodes, LogText, DoScreenshots, Date, Language)
+            PutToIgnoreList(page, GCCodes, LogText, Date, Language)
 
 
-def PutToIgnoreList(page, GCCodes, LogText, DoScreenshots, Date, Language):
+def PutToIgnoreList(page, GCCodes, LogText, Date, Language):
     for GCCode in GCCodes:
         max_retries = 3
         success = False
@@ -69,8 +123,6 @@ def PutToIgnoreList(page, GCCodes, LogText, DoScreenshots, Date, Language):
         button = page.locator(Element)
         button.click()
         page.wait_for_load_state()
-        if DoScreenshots:
-            page.screenshot(path='screenshotIgnore.png')
 
         try:
             if Language == "EN":
@@ -85,7 +137,7 @@ def PutToIgnoreList(page, GCCodes, LogText, DoScreenshots, Date, Language):
         page.wait_for_load_state()
 
 
-def LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode="LOG"):
+def LogCaches(page, GCCodes, LogText, Date, Language, Mode="LOG"):
     for GCCode in GCCodes:
         # Pokus o načtení stránky s retry
         max_retries = 3
@@ -121,14 +173,13 @@ def LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode="LOG")
 
         # Čekání na tlačítko vybraného logu
         log_type_texts = {
-            "LOG": {"EN": "Found it", "CZ": "Nalezeno"},
             "FOUND": {"EN": "Found it", "CZ": "Nalezeno"},
             "DNF": {"EN": "Didn't find it", "CZ": "Nenalezeno"},
             "NOTE": {"EN": "Write note", "CZ": "Poznámka"},
             "NEEDS_OWNER_ATTENTION": {"EN": "Needs owner attention", "CZ": "Vyžadována pozornost vlastníka keše"},
             "NEEDS_REVIEWER_ATTENTION": {"EN": "Needs reviewer attention", "CZ": "Vyžaduje pozornost reviewera"}
         }
-        target_text = log_type_texts.get(Mode, log_type_texts["LOG"])[Language]
+        target_text = log_type_texts.get(Mode, log_type_texts["FOUND"])[Language]
 
         max_wait = 3
         for i in range(max_wait):
@@ -160,9 +211,6 @@ def LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode="LOG")
         page.wait_for_load_state()
         time.sleep(0.5)
 
-        if DoScreenshots:
-            page.screenshot(path=f"screenshot_{GCCode}_logform.png")
-
         # Vyplnit text logu
         try:
             text_field = page.locator('//*[@id="gc-md-editor_md"]')
@@ -170,11 +218,6 @@ def LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode="LOG")
         except:
             print(f"⚠️ Nepodařilo se vyplnit text logu pro {GCCode}")
             continue
-
-        if DoScreenshots:
-            page.screenshot(path=f"screenshot_{GCCode}_logtext.png")
-
-        # Nastavit datum
         try:
             Year, Month, Day = Date.split("-")
             page.locator('//*[@id="log-date"]').click()
@@ -211,8 +254,7 @@ def LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode="LOG")
             print(f"⚠️ Chyba při nastavování data pro {GCCode}: {e}")
             continue
 
-        if DoScreenshots:
-            page.screenshot(path=f"screenshot_{GCCode}_date.png")
+
 
         # Odeslat log
         try:
@@ -224,13 +266,16 @@ def LogCaches(page, GCCodes, LogText, DoScreenshots, Date, Language, Mode="LOG")
             )
             submit_button = page.locator(submit_selector)
             submit_button.click()
-        except:
-            print(f"⚠️ Chyba při odesílání logu pro {GCCode}")
+            time.sleep(2)
+        except Exception as e:
+            print(f"⚠️ Chyba při odesílání logu pro {GCCode}: {e}")
             continue
 
-        page.wait_for_load_state()
-        if DoScreenshots:
-            page.screenshot(path=f"screenshot_{GCCode}_submit.png")
+        try:
+            page.wait_for_load_state()
+        except:
+            pass
+
 
         print(f"✅ Zalogováno {GCCode} – {CacheName}")
         time.sleep(1)
@@ -286,7 +331,7 @@ def extract_gc_codes_from_folder(folder_path):
             print(f"Načítám obsah .gpx souboru: {file_name}")
             with open(file_path, 'r', encoding='utf-8') as file:
                 content = file.read()
-                found_codes = re.findall(r'<name>(GC\\w+)</name>', content)
+                found_codes = re.findall(r'<name>(GC\w+)</name>', content)
                 print(f"Nalezené GC kódy v {file_name}: {found_codes}")
                 gc_codes.extend(found_codes)
 
@@ -317,13 +362,14 @@ def readConfig():
         GCCodes = list(set(GCCodes))
         print(f"Konečný seznam GC kódů: {GCCodes}")
 
-        LogText = data["LogText"]
-        DoScreenshots = data["DoScreenshots"]
-        Date = data["Date"]
-        Mode = data["Mode"]
+        templates = []
+        for key, value in data.items():
+            if key.startswith("LogTemplate_"):
+                templates.append(value)
+
         ShowScreen = data["ShowScreen"]
 
-    return Username, Password, GCCodes, LogText, DoScreenshots, Date, Mode, ShowScreen
+    return Username, Password, GCCodes, templates, ShowScreen
 
 
 
