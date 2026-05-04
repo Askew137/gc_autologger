@@ -2,7 +2,6 @@
 
 ---
 
-**AutoLogger**
 A Python script to automate managing geocaches on Geocaching.com. It supports logging (found, DNF, note, needs attention), adding to ignore list, editing existing logs, and deleting logs.
 
 ---
