@@ -1,75 +1,92 @@
-### AutoLogger Script
+# AutoLogger_GC
 
 A Python script to automate managing geocaches on Geocaching.com. It supports logging (found, DNF, note, needs attention), adding to ignore list, editing existing logs, and deleting logs.
 
----
+## Features
 
-### Features
+- **Multi-Account Support**: Manage multiple Geocaching accounts directly within the script.
 
-- **FOUND / DNF / NOTE / NEEDS_OWNER_ATTENTION / NEEDS_REVIEWER_ATTENTION**: Submits new logs with a customizable date and template-based or manually entered text.
-- **IGNORE**: Adds geocaches to your ignore list.
-- **EDIT_FOUND_LOGS**: Edits your existing logs (can change log type, date, and text).
-- **DELETE_FOUND_LOGS**: Deletes your existing logs automatically.
-- **Interactive Execution**: The script prompts you for the operation mode, date, and log text every time you run it.
-- **Log Templates**: You can pre-define multiple log text templates in the configuration file.
-- **Automatic Code Extraction**: Automatically extracts GC codes from `.gpx` and `.loc` files in the same directory.
+- **Flexible Execution Modes**: Supports Found it, DNF, Write note, Needs maintenance, Need archive, adds caches to ignore list, Edit/Delete existing logs, and a unique **COPY_USER** mode to sync logs with other accounts.
 
----
+- **Smart Input**: Choose between uploading files (batch or individual), or manual GC code entry. Automatically parses `.gpx` and `.loc` files.
 
-### Requirements
+- **Integrated Config Management**: Edit your `InputData.json` settings directly from the terminal.
 
-1. Python 3.7+ installed.
-2. Install the `playwright` Python library:
-   
-   ```bash
-   pip install playwright
-   playwright install
-   ```
+- **Interactive UI**: Log templates, date pinning, and clean summary statistics instead of verbose logs.
 
----
+- **Browser Automation**: Uses `playwright` for reliable interaction with Geocaching.com.
 
-### How to Use
+## Requirements
 
-#### 1. Prepare Configuration
+- Python 3.7+
 
-Edit the `InputData.json` file to include your credentials and settings:
+- Install the `playwright` library and browser binaries:
+  
+  Bash
+  
+  ```
+  pip install playwright
+  playwright install
+  ```
 
-```json
+## How to Use
+
+### 1. Configuration (`InputData.json`)
+
+Configure your accounts and preferences in the `InputData.json` file:
+
+JSON
+
+```
 {
-    "Username": "YourUsername",
-    "Password": "YourPassword",
-    "GCCodes": "GC1234,GC2345,GC3456",
-    "LogTemplate_1": "Thanks for the cache!",
-    "LogTemplate_2": "TFTC! Found it easily.",
+    "User_1_default": true,
+    "Username_1": "YourUsername",
+    "Password_1": "YourPassword",
+    "Username_2": "AnotherUsername",
+    "Password_2": "AnotherPassword",
+    "FolderPath": "C:/Path/To/Your/GPX/Files",
+    "LogTemplate_1": "Found it, thanks!",
+    "LogTemplate_2": "TFTC.",
     "ShowScreen": false
 }
 ```
 
-- **Username / Password**: Your Geocaching.com login credentials.
-- **GCCodes**: Comma-separated list of GC codes. Leave empty `""` if you only use file extraction.
-- **LogTemplate_X**: You can define multiple log templates (e.g., `LogTemplate_1`, `LogTemplate_2`, `LogTemplate_3`). The script will offer these as choices during execution.
-- **ShowScreen**: Set to `true` to watch the browser window during execution, or `false` to run it invisibly (headless).
+- **Username_X / Password_X**: Add as many accounts as you need.
 
-Instead of pasting "GCCodes" manually, you can place any file containing GC codes (`.gpx`, `.loc`) in the same folder and the script will automatically parse and load them.
+- **User_1_default**: Set to `true` to automatically select the first account, or `false` to choose manually at startup.
 
-#### 2. Run the Script
+- **FolderPath**: Define a default directory for your `.gpx` or `.loc` files. If empty, the script uses the current directory.
 
-Run the script in your terminal:
-```bash
+- **LogTemplate_X**: Pre-define your logs for quick selection; add as many templates as you need.
+
+- **ShowScreen**: Set to `true` to watch the browser in real-time, or `false` for headless mode.
+
+### 2. Execution
+
+Run the script:
+
+Bash
+
+```
 python AutoLogger.py
 ```
-(Or use the "play" button in VSCode).
 
-#### 3. Interactive Prompts
+## 🚀 Update v1.2.0: Changelog
 
-When you run the script, it will interactively ask you:
-1. **Mode**: Choose the operation you want to perform (e.g., `FOUND`, `IGNORE`, `EDIT_FOUND_LOGS`, `DELETE_FOUND_LOGS`).
-2. **Date**: Type a date in `YYYY-MM-DD` format, or press Enter to use today's date. (Skipped for IGNORE and DELETE operations).
-3. **Log Text**: Choose one of the templates from your JSON file, or select `[New log]` to type a completely new log text directly in the terminal.
+**New Features:**
 
----
+- **File Selection Menu:** Easily load all files at once, select specific files, or enter GC codes manually.
 
-### Troubleshooting
+- **Multi-Account Support:** Select your account directly at startup.
 
-- **Check Browser Action**: If something isn't working, set `"ShowScreen": true` in `InputData.json` to observe the browser actions in real-time.
-- **Valid Codes**: Make sure your `.gpx`/`.loc` files are valid or your `GCCodes` JSON string is properly comma-separated.
+- **Enhanced Config:** Set a deafult path in JSON and edit your settings directly within the terminal.
+
+- **Sync Functionality:** Added "Log the same caches as [user]" to mirror logs from another account based on a specific date.
+
+- **Efficiency:** Added "Pin" feature for date selection to accelerate bulk logging.
+
+- **UI/UX:** Cleaner terminal output with summary statistics (logs processed vs. successfully completed); updated startup banner.
+
+**Bug Fixes:**
+
+- **Date Logic:** Resolved an issue preventing the logging of caches from previous years.
