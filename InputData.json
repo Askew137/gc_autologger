@@ -1,8 +1,11 @@
 {
-    "Username": "user",
-    "Password": "*****",
-    "GCCodes": "",
+    "User_1_default": true,
+    "Username_1": "user1",
+    "Password_1": "*****",
+    "Username_2": "user2",
+    "Password_2": "*****",
     "LogTemplate_1": "TFTC.",
     "LogTemplate_2": "DFDC. FP+",
+    "FolderPath": "",
     "ShowScreen": false
 }
