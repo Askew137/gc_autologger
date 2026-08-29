@@ -4,6 +4,7 @@ import time
 import os
 import json
 import re
+import shutil
 
 def main():
     accounts, user_1_default, FolderPath, templates, ShowScreen = readConfig()
@@ -930,6 +931,12 @@ def extract_gc_codes_from_folder(folder_path):
 def readConfig():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     input_file_path = os.path.join(script_dir, "InputData.json")
+    example_file_path = os.path.join(script_dir, "InputData_example.json")
+
+    # If InputData.json doesn't exist, automatically initialize it from InputData_example.json
+    if not os.path.exists(input_file_path) and os.path.exists(example_file_path):
+        print(f"Notice: 'InputData.json' not found. Initialized automatically from '{example_file_path}'.")
+        shutil.copy(example_file_path, input_file_path)
 
     with open(input_file_path, encoding="utf-8") as json_file:
         data = json.load(json_file)
