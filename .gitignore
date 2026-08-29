@@ -21,3 +21,7 @@ venv/
 .idea/
 InputData.json.bak_local
 InputData.json.pre_merge_bak
+
+# safety: žádné lokální zálohy
+*.bak*
+*.pre_merge_bak
