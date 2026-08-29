@@ -1,0 +1,23 @@
+# Local secrets — never commit real input data
+InputData.json
+
+# macOS metadata files
+.DS_Store
+**/.DS_Store
+._*
+
+# Python / IDE common noise
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.env.*
+.vscode/
+.idea/
+InputData.json.bak_local
+InputData.json.pre_merge_bak
