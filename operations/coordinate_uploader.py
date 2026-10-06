@@ -136,7 +136,7 @@ class CoordinateUploader:
                     is_voe = self.client.is_virtual_or_earth_cache(item.gccode)
 
                 if is_voe:
-                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache filtered out.", "info")
+                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache / Webcam filtered out.", "info")
                     skipped_count += 1
                     if self.checkpoint_manager:
                         self.checkpoint_manager.record_coord_item(item.gccode, success=True)

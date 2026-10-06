@@ -668,16 +668,16 @@ class GeocachingClient:
 
     def is_virtual_or_earth_cache(self, gc_code: str) -> bool:
         """
-        Check if cache is a Virtual Cache (type 4) or EarthCache (type 137).
+        Check if cache is a Virtual Cache (type 4), Webcam Cache (type 11), or EarthCache (type 137).
         """
         data = self.get_cache_details(gc_code)
         if not data:
             return False
         type_id = data.get("geocacheType")
         type_name = str(data.get("typeName", "")).lower()
-        if type_id in [4, 137]:
+        if type_id in [4, 11, 137]:
             return True
-        if any(k in type_name for k in ["virtual", "earthcache", "earth cache"]):
+        if any(k in type_name for k in ["virtual", "earthcache", "earth cache", "webcam"]):
             return True
         return False
 

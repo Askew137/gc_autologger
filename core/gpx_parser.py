@@ -33,11 +33,11 @@ def _strip_namespaces(root: ET.Element) -> None:
 
 
 def is_virtual_or_earth(cache_type: str) -> bool:
-    """Check if a cache type string represents a Virtual Cache or EarthCache."""
+    """Check if a cache type string represents a Virtual, EarthCache, or Webcam cache."""
     if not cache_type:
         return False
     low = cache_type.strip().lower()
-    return any(k in low for k in ["virtual", "earthcache", "earth cache"])
+    return any(k in low for k in ["virtual", "earthcache", "earth cache", "webcam"])
 
 
 def parse_gpx_file(file_path: str) -> List[WaypointItem]:

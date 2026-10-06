@@ -600,10 +600,10 @@ class UltimateApp:
         filter_content = ctk.CTkFrame(filter_sec, fg_color="transparent")
         filter_content.pack(fill="x", padx=12, pady=(4, 12))
 
-        self.var_omit_virtual_earth = ctk.BooleanVar(value=self.config.filters.omit_virtual_and_earth)
+        self.var_omit_virtual_earth = ctk.BooleanVar(value=self.config.filters.omit_virtual_earth_webcam)
         self.chk_omit_virtual_earth = ctk.CTkCheckBox(
             filter_content,
-            text="Omit virtual and earth caches",
+            text="Omit virtual, earth, and webcam caches",
             font=ctk.CTkFont(size=13),
             variable=self.var_omit_virtual_earth,
             command=self._on_toggle_omit_virtual_earth
@@ -612,7 +612,7 @@ class UltimateApp:
 
         ctk.CTkLabel(
             filter_content,
-            text="💡 Automatically skips Virtual and EarthCache types during coordinate uploading and bulk logging.",
+            text="💡 Automatically skips Virtual, EarthCache, and Webcam types during coordinate uploading and bulk logging.",
             font=ctk.CTkFont(size=11),
             text_color=theme.TEXT_MUTED
         ).pack(anchor="w", padx=4, pady=(0, 4))
@@ -891,11 +891,11 @@ class UltimateApp:
             self.lbl_coords_summary.configure(text=f"Path not found: {path}", text_color=theme.ACCENT_RED)
             return
 
-        if self.config.filters.omit_virtual_and_earth:
+        if self.config.filters.omit_virtual_earth_webcam:
             orig_count = len(self.loaded_waypoints)
             self.loaded_waypoints = [w for w in self.loaded_waypoints if not is_virtual_or_earth(w.cache_type)]
             omitted = orig_count - len(self.loaded_waypoints)
-            filter_msg = f" ({omitted} virtual/earth omitted by filter)" if omitted else ""
+            filter_msg = f" ({omitted} virtual/earth/webcam omitted by filter)" if omitted else ""
         else:
             filter_msg = ""
 
@@ -990,7 +990,7 @@ class UltimateApp:
                     on_log=self.log,
                     source_file_path=source_path,
                     resume=resume,
-                    omit_virtual_and_earth=self.config.filters.omit_virtual_and_earth
+                    omit_virtual_and_earth=self.config.filters.omit_virtual_earth_webcam
                 )
                 self.root.after(0, lambda: self._on_operation_done("Coordinates upload", res))
             finally:
@@ -1011,11 +1011,11 @@ class UltimateApp:
         f = filedialog.askopenfilename(filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("Text files", "*.txt"), ("All files", "*.*")])
         if f:
             items = parse_file(f)
-            if self.config.filters.omit_virtual_and_earth:
+            if self.config.filters.omit_virtual_earth_webcam:
                 orig_c = len(items)
                 items = [it for it in items if not is_virtual_or_earth(it.cache_type)]
                 omitted = orig_c - len(items)
-                omitted_msg = f" ({omitted} virtual/earth omitted by filter)" if omitted else ""
+                omitted_msg = f" ({omitted} virtual/earth/webcam omitted by filter)" if omitted else ""
             else:
                 omitted_msg = ""
 
@@ -1066,7 +1066,7 @@ class UltimateApp:
                     log_text=log_text,
                     on_progress=on_progress,
                     on_log=self.log,
-                    omit_virtual_and_earth=self.config.filters.omit_virtual_and_earth
+                    omit_virtual_and_earth=self.config.filters.omit_virtual_earth_webcam
                 )
                 self.root.after(0, lambda: self._on_operation_done("Bulk logging", res))
             finally:
@@ -1324,10 +1324,10 @@ class UltimateApp:
                 self.log(f"Removed template #{index + 1}.", "info")
 
     def _on_toggle_omit_virtual_earth(self):
-        self.config.filters.omit_virtual_and_earth = self.var_omit_virtual_earth.get()
+        self.config.filters.omit_virtual_earth_webcam = self.var_omit_virtual_earth.get()
         self.config_mgr.save()
-        status = "enabled" if self.config.filters.omit_virtual_and_earth else "disabled"
-        self.log(f"Filter 'Omit virtual and earth caches' {status}.", "info")
+        status = "enabled" if self.config.filters.omit_virtual_earth_webcam else "disabled"
+        self.log(f"Filter 'Omit virtual, earth, and webcam caches' {status}.", "info")
 
     def _on_set_safety_defaults(self):
         self.entry_min_delay.delete(0, "end")

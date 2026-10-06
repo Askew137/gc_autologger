@@ -123,7 +123,7 @@ def run_cli():
             items,
             mode=upload_mode,
             on_log=lambda m, lvl: print(f"[{lvl.upper()}] {m}"),
-            omit_virtual_and_earth=config.filters.omit_virtual_and_earth
+            omit_virtual_and_earth=config.filters.omit_virtual_earth_webcam
         )
         return
 
@@ -171,7 +171,7 @@ def run_cli():
             date_str=date_str,
             log_text=log_text,
             on_log=lambda m, lvl: print(f"[{lvl.upper()}] {m}"),
-            omit_virtual_and_earth=config.filters.omit_virtual_and_earth
+            omit_virtual_and_earth=config.filters.omit_virtual_earth_webcam
         )
         return
 

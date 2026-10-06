@@ -104,7 +104,7 @@ class CacheLogger:
             if omit_virtual_and_earth:
                 if self.client.is_virtual_or_earth_cache(clean_code):
                     success_count += 1
-                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache filtered out", "info")
+                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache / Webcam filtered out", "info")
                     percent = (idx / total) * 100
                     if on_progress:
                         on_progress(idx, total, percent, None, clean_code)

@@ -30,7 +30,7 @@ class SafetyConfig:
 
 @dataclass
 class FilterConfig:
-    omit_virtual_and_earth: bool = False
+    omit_virtual_earth_webcam: bool = False
 
 
 @dataclass
@@ -189,8 +189,9 @@ class ConfigManager:
 
         # Filters
         raw_filters = data.get("filters", {})
+        val = raw_filters.get("omit_virtual_earth_webcam", raw_filters.get("omit_virtual_and_earth", False))
         filters = FilterConfig(
-            omit_virtual_and_earth=bool(raw_filters.get("omit_virtual_and_earth", False))
+            omit_virtual_earth_webcam=bool(val)
         )
 
         # GUI

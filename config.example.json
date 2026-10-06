@@ -27,7 +27,7 @@
     "auto_relogin": true
   },
   "filters": {
-    "omit_virtual_and_earth": false
+    "omit_virtual_earth_webcam": false
   },
   "gui": {
     "theme": "dark",
