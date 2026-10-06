@@ -32,6 +32,14 @@ def _strip_namespaces(root: ET.Element) -> None:
             elem.tag = elem.tag.split('}', 1)[1]
 
 
+def is_virtual_or_earth(cache_type: str) -> bool:
+    """Check if a cache type string represents a Virtual Cache or EarthCache."""
+    if not cache_type:
+        return False
+    low = cache_type.strip().lower()
+    return any(k in low for k in ["virtual", "earthcache", "earth cache"])
+
+
 def parse_gpx_file(file_path: str) -> List[WaypointItem]:
     """
     Parse caches and coordinates from a GPX file.
@@ -79,6 +87,10 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
             c_name_elem = c_elem.find("name")
             if c_name_elem is not None and c_name_elem.text:
                 cache_name = c_name_elem.text.strip()
+            if not wpt_type:
+                c_type_elem = c_elem.find("type")
+                if c_type_elem is not None and c_type_elem.text:
+                    wpt_type = c_type_elem.text.strip()
         if not cache_name:
             urlname_elem = wpt.find("urlname")
             if urlname_elem is not None and urlname_elem.text:

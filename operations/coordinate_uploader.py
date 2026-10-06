@@ -8,7 +8,7 @@ Provides progress reporting, live ETA calculation, and safety pacing.
 
 import time
 from typing import List, Callable, Optional, Dict, Any
-from core.gpx_parser import WaypointItem
+from core.gpx_parser import WaypointItem, is_virtual_or_earth
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
@@ -37,7 +37,8 @@ class CoordinateUploader:
         on_progress: Optional[Callable[[int, int, float, Optional[float], WaypointItem], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None,
         source_file_path: str = "",
-        resume: bool = False
+        resume: bool = False,
+        omit_virtual_and_earth: bool = False
     ) -> Dict[str, Any]:
         """
         Execute the upload process.
@@ -125,6 +126,24 @@ class CoordinateUploader:
                     percent = (idx / total) * 100
                     on_progress(idx, total, percent, None, item)
                 continue
+
+            # Omit virtual and earth caches filter
+            if omit_virtual_and_earth:
+                is_voe = False
+                if is_virtual_or_earth(item.cache_type):
+                    is_voe = True
+                elif not item.cache_type:
+                    is_voe = self.client.is_virtual_or_earth_cache(item.gccode)
+
+                if is_voe:
+                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache filtered out.", "info")
+                    skipped_count += 1
+                    if self.checkpoint_manager:
+                        self.checkpoint_manager.record_coord_item(item.gccode, success=True)
+                    if on_progress:
+                        percent = (idx / total) * 100
+                        on_progress(idx, total, percent, None, item)
+                    continue
 
             # Mode check: Unmodified only
             if mode == self.MODE_UNMODIFIED_ONLY:

@@ -29,6 +29,11 @@ class SafetyConfig:
 
 
 @dataclass
+class FilterConfig:
+    omit_virtual_and_earth: bool = False
+
+
+@dataclass
 class GuiConfig:
     theme: str = "dark"
     color_theme: str = "blue"
@@ -44,6 +49,7 @@ class AppConfig:
         "Quick and easy find. Greetings from Czech Republic!"
     ])
     safety: SafetyConfig = field(default_factory=SafetyConfig)
+    filters: FilterConfig = field(default_factory=FilterConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
 
 
@@ -93,6 +99,7 @@ class ConfigManager:
                 "folder_path": self.config.folder_path,
                 "log_templates": self.config.log_templates,
                 "safety": asdict(self.config.safety),
+                "filters": asdict(self.config.filters),
                 "gui": asdict(self.config.gui)
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
@@ -180,6 +187,12 @@ class ConfigManager:
             auto_relogin=bool(raw_safety.get("auto_relogin", True))
         )
 
+        # Filters
+        raw_filters = data.get("filters", {})
+        filters = FilterConfig(
+            omit_virtual_and_earth=bool(raw_filters.get("omit_virtual_and_earth", False))
+        )
+
         # GUI
         raw_gui = data.get("gui", {})
         gui = GuiConfig(
@@ -192,6 +205,7 @@ class ConfigManager:
             folder_path=str(data.get("folder_path", "")),
             log_templates=list(data.get("log_templates", [])),
             safety=safety,
+            filters=filters,
             gui=gui
         )
 

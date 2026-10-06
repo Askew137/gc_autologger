@@ -26,6 +26,9 @@
     "breather_duration_seconds": 4.0,
     "auto_relogin": true
   },
+  "filters": {
+    "omit_virtual_and_earth": false
+  },
   "gui": {
     "theme": "dark",
     "color_theme": "blue"

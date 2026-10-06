@@ -39,8 +39,8 @@ class CacheLogger:
         gc_codes: List[str],
         log_type_key: str,
         date_str: str,
-        log_text: str,
         skip_already_found: bool = True,
+        omit_virtual_and_earth: bool = False,
         on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None
     ) -> Dict[str, Any]:
@@ -95,6 +95,16 @@ class CacheLogger:
                     success_count += 1
                     date_info = f" on {found_date}" if found_date else ""
                     log(f"{prefix} ⏭️ Already found{date_info} (skipped duplicate)", "info")
+                    percent = (idx / total) * 100
+                    if on_progress:
+                        on_progress(idx, total, percent, None, clean_code)
+                    continue
+
+            # Check if Virtual or EarthCache should be omitted
+            if omit_virtual_and_earth:
+                if self.client.is_virtual_or_earth_cache(clean_code):
+                    success_count += 1
+                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache filtered out", "info")
                     percent = (idx / total) * 100
                     if on_progress:
                         on_progress(idx, total, percent, None, clean_code)

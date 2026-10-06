@@ -122,7 +122,8 @@ def run_cli():
         uploader.run(
             items,
             mode=upload_mode,
-            on_log=lambda m, lvl: print(f"[{lvl.upper()}] {m}")
+            on_log=lambda m, lvl: print(f"[{lvl.upper()}] {m}"),
+            omit_virtual_and_earth=config.filters.omit_virtual_and_earth
         )
         return
 
@@ -169,7 +170,8 @@ def run_cli():
             log_type_key=selected_mode,
             date_str=date_str,
             log_text=log_text,
-            on_log=lambda m, lvl: print(f"[{lvl.upper()}] {m}")
+            on_log=lambda m, lvl: print(f"[{lvl.upper()}] {m}"),
+            omit_virtual_and_earth=config.filters.omit_virtual_and_earth
         )
         return
 

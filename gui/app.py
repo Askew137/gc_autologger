@@ -26,7 +26,7 @@ from core.config import ConfigManager, AccountConfig
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
-from core.gpx_parser import parse_file, parse_folder, extract_gc_codes_from_string, WaypointItem
+from core.gpx_parser import parse_file, parse_folder, extract_gc_codes_from_string, WaypointItem, is_virtual_or_earth
 from operations.coordinate_uploader import CoordinateUploader
 from operations.cache_logger import CacheLogger, LOG_TYPE_MAP, LOG_TYPE_NAMES
 from operations.user_copy import UserLogCopier
@@ -592,7 +592,32 @@ class UltimateApp:
 
         ctk.CTkButton(add_tmpl_frame, text="+ Add log template", width=140, command=self._on_add_template).pack(side="left", padx=4)
 
-        # 3. Safety & Delays Section
+        # 3. Filters Section
+        filter_sec = ctk.CTkFrame(scroll)
+        filter_sec.pack(fill="x", pady=6, padx=6)
+        ctk.CTkLabel(filter_sec, text="Filters", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=12, pady=(10, 4))
+
+        filter_content = ctk.CTkFrame(filter_sec, fg_color="transparent")
+        filter_content.pack(fill="x", padx=12, pady=(4, 12))
+
+        self.var_omit_virtual_earth = ctk.BooleanVar(value=self.config.filters.omit_virtual_and_earth)
+        self.chk_omit_virtual_earth = ctk.CTkCheckBox(
+            filter_content,
+            text="Omit virtual and earth caches",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_omit_virtual_earth,
+            command=self._on_toggle_omit_virtual_earth
+        )
+        self.chk_omit_virtual_earth.pack(anchor="w", padx=4, pady=4)
+
+        ctk.CTkLabel(
+            filter_content,
+            text="💡 Automatically skips Virtual and EarthCache types during coordinate uploading and bulk logging.",
+            font=ctk.CTkFont(size=11),
+            text_color=theme.TEXT_MUTED
+        ).pack(anchor="w", padx=4, pady=(0, 4))
+
+        # 4. Safety & Delays Section
         safety_sec = ctk.CTkFrame(scroll)
         safety_sec.pack(fill="x", pady=6, padx=6)
         ctk.CTkLabel(safety_sec, text="Safety & anti-detection pacing", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=12, pady=(10, 4))
@@ -866,13 +891,21 @@ class UltimateApp:
             self.lbl_coords_summary.configure(text=f"Path not found: {path}", text_color=theme.ACCENT_RED)
             return
 
+        if self.config.filters.omit_virtual_and_earth:
+            orig_count = len(self.loaded_waypoints)
+            self.loaded_waypoints = [w for w in self.loaded_waypoints if not is_virtual_or_earth(w.cache_type)]
+            omitted = orig_count - len(self.loaded_waypoints)
+            filter_msg = f" ({omitted} virtual/earth omitted by filter)" if omitted else ""
+        else:
+            filter_msg = ""
+
         count = len(self.loaded_waypoints)
         modified_hints = sum(1 for w in self.loaded_waypoints if w.is_modified_hint)
         self.lbl_coords_summary.configure(
-            text=f"Loaded {count} caches ({modified_hints} flagged with modified coords in GPX).",
+            text=f"Loaded {count} caches ({modified_hints} flagged with modified coords in GPX){filter_msg}.",
             text_color=theme.ACCENT_GREEN if count > 0 else theme.TEXT_MUTED
         )
-        self.log(f"Loaded {count} waypoints from '{os.path.basename(path)}'.", "info")
+        self.log(f"Loaded {count} waypoints from '{os.path.basename(path)}'{filter_msg}.", "info")
 
     def _load_coords_items(self):
         path = self.coords_path_entry.get().strip()
@@ -956,7 +989,8 @@ class UltimateApp:
                     on_progress=on_progress,
                     on_log=self.log,
                     source_file_path=source_path,
-                    resume=resume
+                    resume=resume,
+                    omit_virtual_and_earth=self.config.filters.omit_virtual_and_earth
                 )
                 self.root.after(0, lambda: self._on_operation_done("Coordinates upload", res))
             finally:
@@ -977,10 +1011,18 @@ class UltimateApp:
         f = filedialog.askopenfilename(filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("Text files", "*.txt"), ("All files", "*.*")])
         if f:
             items = parse_file(f)
+            if self.config.filters.omit_virtual_and_earth:
+                orig_c = len(items)
+                items = [it for it in items if not is_virtual_or_earth(it.cache_type)]
+                omitted = orig_c - len(items)
+                omitted_msg = f" ({omitted} virtual/earth omitted by filter)" if omitted else ""
+            else:
+                omitted_msg = ""
+
             codes = [it.gccode for it in items]
             if codes:
                 self.txt_gc_codes.insert("end", " ".join(codes) + "\n")
-                self.log(f"Imported {len(codes)} GC codes from {os.path.basename(f)}.", "info")
+                self.log(f"Imported {len(codes)} GC codes from {os.path.basename(f)}{omitted_msg}.", "info")
 
     def _start_bulk_logging(self):
         raw_text = self.txt_gc_codes.get("1.0", "end").strip()
@@ -1023,7 +1065,8 @@ class UltimateApp:
                     date_str=date_str,
                     log_text=log_text,
                     on_progress=on_progress,
-                    on_log=self.log
+                    on_log=self.log,
+                    omit_virtual_and_earth=self.config.filters.omit_virtual_and_earth
                 )
                 self.root.after(0, lambda: self._on_operation_done("Bulk logging", res))
             finally:
@@ -1279,6 +1322,12 @@ class UltimateApp:
                 self._refresh_templates_view()
                 self.combo_template.configure(values=self.config.log_templates)
                 self.log(f"Removed template #{index + 1}.", "info")
+
+    def _on_toggle_omit_virtual_earth(self):
+        self.config.filters.omit_virtual_and_earth = self.var_omit_virtual_earth.get()
+        self.config_mgr.save()
+        status = "enabled" if self.config.filters.omit_virtual_and_earth else "disabled"
+        self.log(f"Filter 'Omit virtual and earth caches' {status}.", "info")
 
     def _on_set_safety_defaults(self):
         self.entry_min_delay.delete(0, "end")

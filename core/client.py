@@ -64,6 +64,7 @@ class GeocachingClient:
         self.csrf_token: Optional[str] = None
         self.logged_in_username: Optional[str] = None
         self.current_credentials: Optional[Tuple[str, str]] = None
+        self._cache_details_cache: Dict[str, Dict[str, Any]] = {}
 
         self.load_cookies()
 
@@ -189,6 +190,7 @@ class GeocachingClient:
         self.csrf_token = None
         self.logged_in_username = None
         self.current_credentials = None
+        self._cache_details_cache.clear()
 
     def switch_account(self, username: str, password: Optional[str] = None) -> Tuple[bool, str]:
         """
@@ -628,26 +630,56 @@ class GeocachingClient:
         except Exception as e:
             return False, f"Error posting log: {str(e)}"
 
-    def is_cache_found(self, gc_code: str) -> Tuple[bool, Optional[str]]:
+    def get_cache_details(self, gc_code: str) -> Optional[Dict[str, Any]]:
         """
-        Check if the authenticated user has already logged this cache as 'Found it'.
-        Returns (True, "YYYY-MM-DD") if found, or (False, None) if not found.
+        Fetch basic cache metadata (found status, cache type, etc.) with in-memory caching.
         """
+        code = gc_code.strip().upper()
+        if code in self._cache_details_cache:
+            return self._cache_details_cache[code]
+
         try:
             bearer = self.get_oauth_bearer_token()
             headers = {"Accept": "application/json"}
             if bearer:
                 headers["Authorization"] = f"Bearer {bearer}"
-            api_url = f"{self.API_PROXY_URL}/web/v1/geocache/{gc_code}"
+            api_url = f"{self.API_PROXY_URL}/web/v1/geocache/{code}"
             resp = self.session.get(api_url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
-                found_dt = data.get("callerSpecific", {}).get("found")
-                if found_dt:
-                    return True, str(found_dt).split("T")[0]
+                if isinstance(data, dict):
+                    self._cache_details_cache[code] = data
+                    return data
         except Exception:
             pass
+        return None
+
+    def is_cache_found(self, gc_code: str) -> Tuple[bool, Optional[str]]:
+        """
+        Check if the authenticated user has already logged this cache as 'Found it'.
+        Returns (True, "YYYY-MM-DD") if found, or (False, None) if not found.
+        """
+        data = self.get_cache_details(gc_code)
+        if data:
+            found_dt = data.get("callerSpecific", {}).get("found")
+            if found_dt:
+                return True, str(found_dt).split("T")[0]
         return False, None
+
+    def is_virtual_or_earth_cache(self, gc_code: str) -> bool:
+        """
+        Check if cache is a Virtual Cache (type 4) or EarthCache (type 137).
+        """
+        data = self.get_cache_details(gc_code)
+        if not data:
+            return False
+        type_id = data.get("geocacheType")
+        type_name = str(data.get("typeName", "")).lower()
+        if type_id in [4, 137]:
+            return True
+        if any(k in type_name for k in ["virtual", "earthcache", "earth cache"]):
+            return True
+        return False
 
     def get_ignored_cache_codes(self) -> set:
         """
