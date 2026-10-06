@@ -1,0 +1,70 @@
+name: Build Windows Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Executable (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build standalone .exe with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onefile --windowed `
+            --name "GC_Autologger" `
+            --icon "assets/icon.ico" `
+            --collect-all customtkinter `
+            --add-data "assets;assets" `
+            --add-data "config.example.json;." `
+            main.py
+
+      - name: Prepare release package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "release_pkg" -Force
+          Copy-Item "dist/GC_Autologger.exe" -Destination "release_pkg/"
+          Copy-Item "config.example.json" -Destination "release_pkg/"
+          Copy-Item "README.md" -Destination "release_pkg/"
+          Compress-Archive -Path "release_pkg/*" -DestinationPath "GC_Autologger_Windows.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GC_Autologger_Windows
+          path: |
+            dist/GC_Autologger.exe
+            GC_Autologger_Windows.zip
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/GC_Autologger.exe
+            GC_Autologger_Windows.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true

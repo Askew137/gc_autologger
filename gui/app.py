@@ -67,8 +67,41 @@ class UltimateApp:
         self.is_running = False
 
         self._init_ui()
+        self._set_app_icon()
         self._init_client_session()
         self._check_active_checkpoint()
+
+    def _set_app_icon(self):
+        """Set window icon and macOS Dock icon if assets exist."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        png_path = os.path.join(base_dir, "assets", "icon.png")
+        ico_path = os.path.join(base_dir, "assets", "icon.ico")
+
+        # 1. macOS Dock icon via AppKit / Cocoa
+        if sys.platform == "darwin" and os.path.exists(png_path):
+            try:
+                from AppKit import NSApplication, NSImage
+                app = NSApplication.sharedApplication()
+                icon = NSImage.alloc().initWithContentsOfFile_(png_path)
+                if icon:
+                    app.setApplicationIconImage_(icon)
+            except Exception:
+                pass
+
+        # 2. Window titlebar & taskbar icon (Windows / Linux)
+        if os.path.exists(ico_path) and sys.platform == "win32":
+            try:
+                self.root.iconbitmap(ico_path)
+            except Exception:
+                pass
+        elif os.path.exists(png_path):
+            try:
+                from PIL import Image, ImageTk
+                im = Image.open(png_path).resize((64, 64))
+                self._icon_photo = ImageTk.PhotoImage(im)
+                self.root.wm_iconphoto(True, self._icon_photo)
+            except Exception:
+                pass
 
     def _show_missing_ctk_dialog(self):
         """Fallback dialog when customtkinter is not yet installed."""
