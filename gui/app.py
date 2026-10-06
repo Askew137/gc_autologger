@@ -77,16 +77,19 @@ class UltimateApp:
         png_path = os.path.join(base_dir, "assets", "icon.png")
         ico_path = os.path.join(base_dir, "assets", "icon.ico")
 
-        # 1. macOS Dock icon via AppKit / Cocoa
-        if sys.platform == "darwin" and os.path.exists(png_path):
-            try:
-                from AppKit import NSApplication, NSImage
-                app = NSApplication.sharedApplication()
-                icon = NSImage.alloc().initWithContentsOfFile_(png_path)
-                if icon:
-                    app.setApplicationIconImage_(icon)
-            except Exception:
-                pass
+        # 1. macOS Dock icon via AppKit / Cocoa (prefers native multi-res .icns)
+        if sys.platform == "darwin":
+            icns_path = os.path.join(base_dir, "assets", "icon.icns")
+            icon_file = icns_path if os.path.exists(icns_path) else png_path
+            if os.path.exists(icon_file):
+                try:
+                    from AppKit import NSApplication, NSImage
+                    app = NSApplication.sharedApplication()
+                    icon = NSImage.alloc().initWithContentsOfFile_(icon_file)
+                    if icon:
+                        app.setApplicationIconImage_(icon)
+                except Exception:
+                    pass
 
         # 2. Window titlebar & taskbar icon (Windows / Linux)
         if os.path.exists(ico_path) and sys.platform == "win32":
