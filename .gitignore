@@ -49,3 +49,6 @@ report_*.txt
 # Local reference source code
 cgeo source code/
 cgeo*/
+
+# Local conversation summary
+PROJECT_SUMMARY.md
