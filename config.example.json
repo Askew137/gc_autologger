@@ -1,0 +1,33 @@
+{
+  "accounts": [
+    {
+      "id": "1",
+      "username": "YourUsername",
+      "password": "YourPassword",
+      "is_default": true
+    },
+    {
+      "id": "2",
+      "username": "SecondUsername",
+      "password": "SecondPassword",
+      "is_default": false
+    }
+  ],
+  "folder_path": "",
+  "log_templates": [
+    "Díky za keš!",
+    "Odloveno během dnešního výletu. Díky za pěknou kešku!",
+    "Rychlý a bezproblémový nález při odpolední procházce. Díkeš!"
+  ],
+  "safety": {
+    "min_delay_seconds": 0.7,
+    "max_delay_seconds": 1.2,
+    "breather_interval": 50,
+    "breather_duration_seconds": 4.0,
+    "auto_relogin": true
+  },
+  "gui": {
+    "theme": "dark",
+    "color_theme": "blue"
+  }
+}

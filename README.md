@@ -1,92 +1,144 @@
-# AutoLogger_GC
+# 🧭 GC Autologger
 
-A Python script to automate managing geocaches on Geocaching.com. It supports logging (found, DNF, note, needs attention), adding to ignore list, editing existing logs, and deleting logs.
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![GUI-CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-1db954.svg)](https://customtkinter.tomschimansky.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+**GC Autologger** is a modern, high-performance desktop application for batch geocache logging and bulk coordinate uploading on [Geocaching.com](https://www.geocaching.com).
 
-- **Multi-Account Support**: Manage multiple Geocaching accounts directly within the script.
+Unlike traditional browser automation tools that rely on slow browser rendering (Playwright/Selenium), GC Autologger communicates **directly with Geocaching.com's internal REST and tRPC batch APIs**, replicating the proven architecture of **c:geo**. 
 
-- **Flexible Execution Modes**: Supports Found it, DNF, Write note, Needs maintenance, Need archive, adds caches to ignore list, Edit/Delete existing logs, and a unique **COPY_USER** mode to sync logs with other accounts.
+---
 
-- **Smart Input**: Choose between uploading files (batch or individual), or manual GC code entry. Automatically parses `.gpx` and `.loc` files.
+## ✨ Features
 
-- **Integrated Config Management**: Edit your `InputData.json` settings directly from the terminal.
+### 📍 Bulk Coordinate Upload (from GPX / LOC)
+* **Direct Coordinate API**: Sets corrected coordinates via `/seek/geocache.usercoordinate` using Base16/Base31 mathematical conversion (`gc_code_to_cache_id`), eliminating listing download overhead.
+* **Dual Upload Modes**:
+  1. **Complete Overwrite**: Updates coordinates for all caches in your GPX/LOC file.
+  2. **Only Unmodified**: Automatically checks Geocaching.com and only updates caches that don't already have corrected coordinates.
+* **Smart GPX Parser**: Reads standard waypoints (`<wpt>`), c:geo exports, GSAK tags (`LatBeforeCorrect`), GeoGet, and child final waypoints (`FN...`).
 
-- **Interactive UI**: Log templates, date pinning, and clean summary statistics instead of verbose logs.
+### 📝 Bulk Logging Engine
+* **High-Speed tRPC Batching**: Submits logs via Geocaching.com's modern batch endpoint `/api/live/v1/trpc/web.logs.createGeocacheLog`.
+* **Supported Log Types**:
+  * *Found it*
+  * *Didn't find it (DNF)*
+  * *Write note*
+  * *Needs maintenance*
+  * *Needs archive* (with confirmation safeguard)
+* **Log Templates**: Manage and select predefined log templates with customizable timestamps and dates.
 
-- **Browser Automation**: Uses `playwright` for reliable interaction with Geocaching.com.
+### 🛡️ Anti-Detection & Safety Engine (Designed for 1000+ Caches)
+* **Realistic Pacing & Jitter**: Configurable delay (0.6s – 1.2s) with randomized jitter prevents mechanical request patterns.
+* **Batch Breathers**: Automatically pauses every 50 caches (3s – 6s) to avoid triggering Cloudflare or rate-limiters.
+* **Genuine Browser Headers**: Sends authentic browser headers (`Sec-Ch-Ua`, `Referer` per cache, `Origin`, `X-Requested-With`).
+* **Session Persistence**: Encrypted session cookies are cached in `session_cookies.json`, avoiding repeated logins.
+* **Auto-Recovery**: Automatically handles `401 Unauthorized` / `403 Forbidden` with instant re-authentication, and handles `429 Too Many Requests` with exponential backoff.
 
-## Requirements
+### 👥 Copy User & Ignore List
+* **Copy User**: Scans another user's logged caches for a given date and logs the same caches to your account.
+* **Ignore List**: Bulk-add hundreds of caches to your ignore bookmark list in seconds.
 
-- Python 3.7+
+### 💻 Modern GUI + Terminal CLI
+* **CustomTkinter Dark Theme**: Sleek, responsive interface inspired by Spotify and Discord.
+* **Interactive Config & Accounts Editor**: Add, edit, remove accounts and adjust safety sliders directly from the GUI.
+* **Live Progress & Console**: Displays percentage progress, real-time ETA countdown, and color-coded logs.
+* **CLI Mode**: Full terminal interface available via `python3 main.py --cli`.
 
-- Install the `playwright` library and browser binaries:
-  
-  Bash
-  
-  ```
-  pip install playwright
-  playwright install
-  ```
+---
 
-## How to Use
+## 🚀 Getting Started
 
-### 1. Configuration (`InputData.json`)
+### Prerequisites
+* Python 3.9 or higher
 
-Configure your accounts and preferences in the `InputData.json` file:
+### Installation
 
-JSON
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Askew137/gc_autologger.git
+   cd gc_autologger
+   ```
 
-```
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Launch the application:**
+   ```bash
+   # Launch GUI (Modern CustomTkinter)
+   python3 main.py
+
+   # Or launch in interactive terminal mode
+   python3 main.py --cli
+   ```
+
+---
+
+## ⚙️ Configuration
+
+You can configure your accounts and settings directly in the **⚙️ Config & Accounts** tab in the GUI, or by creating a `config.json` file (see `config.example.json`):
+
+```json
 {
-    "User_1_default": true,
-    "Username_1": "YourUsername",
-    "Password_1": "YourPassword",
-    "Username_2": "AnotherUsername",
-    "Password_2": "AnotherPassword",
-    "FolderPath": "C:/Path/To/Your/GPX/Files",
-    "LogTemplate_1": "Found it, thanks!",
-    "LogTemplate_2": "TFTC.",
-    "ShowScreen": false
+  "accounts": [
+    {
+      "id": "1",
+      "username": "YourUsername",
+      "password": "YourPassword",
+      "is_default": true
+    }
+  ],
+  "folder_path": "/path/to/your/gpx_files",
+  "log_templates": [
+    "Thanks for the cache! TFTC",
+    "Found during our weekend caching trip. Greetings from Czech Republic!"
+  ],
+  "safety": {
+    "min_delay_seconds": 0.7,
+    "max_delay_seconds": 1.2,
+    "breather_interval": 50,
+    "breather_duration_seconds": 4.0,
+    "auto_relogin": true
+  },
+  "gui": {
+    "theme": "dark",
+    "color_theme": "blue"
+  }
 }
 ```
 
-- **Username_X / Password_X**: Add as many accounts as you need.
+> **Note**: `config.json` and `session_cookies.json` are automatically ignored by `.gitignore` to protect your credentials.
 
-- **User_1_default**: Set to `true` to automatically select the first account, or `false` to choose manually at startup.
+---
 
-- **FolderPath**: Define a default directory for your `.gpx` or `.loc` files. If empty, the script uses the current directory.
-
-- **LogTemplate_X**: Pre-define your logs for quick selection; add as many templates as you need.
-
-- **ShowScreen**: Set to `true` to watch the browser in real-time, or `false` for headless mode.
-
-### 2. Execution
-
-Run the script:
-
-Bash
+## 📁 Project Architecture
 
 ```
-python AutoLogger.py
+gc_autologger/
+├── main.py                     # Primary entry point (launches GUI or CLI)
+├── cli.py                      # Interactive terminal interface
+├── requirements.txt            # Python dependencies
+├── config.example.json         # Example configuration
+├── core/
+│   ├── client.py               # Direct Geocaching HTTP client (REST, tRPC, tokens)
+│   ├── converter.py            # Base16/Base31 GC code <-> cacheId converter (from c:geo)
+│   ├── gpx_parser.py           # Universal GPX & LOC parser with namespace stripping
+│   ├── config.py               # JSON settings manager with legacy migration
+│   └── safety.py               # Pacing engine, jitter, and rate-limit backoff
+├── operations/
+│   ├── coordinate_uploader.py  # Bulk coordinate upload manager (2 modes)
+│   ├── cache_logger.py         # Bulk logging & ignore manager
+│   └── user_copy.py            # User log scraper and copier
+└── gui/
+    ├── app.py                  # CustomTkinter GUI main window
+    └── theme.py                # Visual styling and color palette
 ```
 
-## 🚀 Update v1.2.0: Changelog
+---
 
-**New Features:**
+## ⚖️ Disclaimer
 
-- **File Selection Menu:** Easily load all files at once, select specific files, or enter GC codes manually.
-
-- **Multi-Account Support:** Select your account directly at startup.
-
-- **Enhanced Config:** Set a deafult path in JSON and edit your settings directly within the terminal.
-
-- **Sync Functionality:** Added "Log the same caches as [user]" to mirror logs from another account based on a specific date.
-
-- **Efficiency:** Added "Pin" feature for date selection to accelerate bulk logging.
-
-- **UI/UX:** Cleaner terminal output with summary statistics (logs processed vs. successfully completed); updated startup banner.
-
-**Bug Fixes:**
-
-- **Date Logic:** Resolved an issue preventing the logging of caches from previous years.
+This tool is designed for personal use to manage your own geocaching logs and solved mystery coordinates. Please cache responsibly, respect rate limits, and adhere to the Geocaching.com Terms of Use.

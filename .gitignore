@@ -1,27 +1,51 @@
-# Local secrets — never commit real input data
-InputData.json
+# Private user credentials and session data
+config.json
+session_cookies.json
+*.session
 
-# macOS metadata files
-.DS_Store
-**/.DS_Store
-._*
-
-# Python / IDE common noise
+# Python cache & build
 __pycache__/
 *.py[cod]
-*.pyc
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.venv/
-venv/
-.env
-.env.*
-.vscode/
-.idea/
-InputData.json.bak_local
-InputData.json.pre_merge_bak
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# safety: žádné lokální zálohy
-*.bak*
-*.pre_merge_bak
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs & exports
+logs/
+runs/
+*.log
+report_*.txt
+
+# Local reference source code
+cgeo source code/
+cgeo*/
