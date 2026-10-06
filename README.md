@@ -51,12 +51,23 @@ Unlike traditional browser automation tools that rely on slow browser rendering 
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### 🪟 Windows (Standalone Executable)
+
+For Windows users, no Python installation or command-line setup is required:
+1. Go to [Releases](https://github.com/Askew137/gc_autologger/releases) (or the **Actions** tab for automated CI builds).
+2. Download and unpack `GC_Autologger_Windows.zip`.
+3. Double-click `GC_Autologger.exe` to launch the application.
+
+---
+
+### 🍎 macOS & Linux (Run from Source)
+
+#### Prerequisites
 * Python 3.9 or higher
 
-### ⚡ Quick Start (Recommended)
+#### ⚡ Quick Start (Recommended)
 
-Simply clone the repository and run the launcher script. It automatically initializes the virtual environment, installs any missing dependencies, and starts the application:
+Simply clone the repository and run the launcher script. It automatically initializes the virtual environment, installs any missing dependencies on first launch, and starts the application:
 
 ```bash
 git clone https://github.com/Askew137/gc_autologger.git
@@ -69,7 +80,7 @@ To run in interactive terminal mode instead of GUI:
 ./start.sh --cli
 ```
 
-### Manual Installation & Launch
+#### Manual Installation & Launch
 
 If you prefer to manage the virtual environment manually:
 
@@ -85,43 +96,6 @@ pip install -r requirements.txt
 python3 main.py          # Modern CustomTkinter GUI
 python3 main.py --cli    # Interactive terminal CLI
 ```
-
----
-
-## ⚙️ Configuration
-
-You can configure your accounts and settings directly in the **⚙️ Config & Accounts** tab in the GUI, or by creating a `config.json` file (see `config.example.json`):
-
-```json
-{
-  "accounts": [
-    {
-      "id": "1",
-      "username": "YourUsername",
-      "password": "YourPassword",
-      "is_default": true
-    }
-  ],
-  "folder_path": "/path/to/your/gpx_files",
-  "log_templates": [
-    "Thanks for the cache! TFTC",
-    "Found during our weekend caching trip. Greetings from Czech Republic!"
-  ],
-  "safety": {
-    "min_delay_seconds": 0.7,
-    "max_delay_seconds": 1.2,
-    "breather_interval": 50,
-    "breather_duration_seconds": 4.0,
-    "auto_relogin": true
-  },
-  "gui": {
-    "theme": "dark",
-    "color_theme": "blue"
-  }
-}
-```
-
-> **Note**: `config.json` and `session_cookies.json` are automatically ignored by `.gitignore` to protect your credentials.
 
 ---
 
