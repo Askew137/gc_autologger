@@ -2,7 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![GUI-CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-1db954.svg)](https://customtkinter.tomschimansky.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 **GC Autologger** is a modern, high-performance desktop application for batch geocache logging and bulk coordinate uploading on [Geocaching.com](https://www.geocaching.com).
 
