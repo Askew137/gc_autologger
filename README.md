@@ -4,9 +4,9 @@
 [![GUI-CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-1db954.svg)](https://customtkinter.tomschimansky.com/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-**GC Autologger** is a modern, high-performance desktop application for batch geocache logging and bulk coordinate uploading on [Geocaching.com](https://www.geocaching.com).
+**GC Autologger** is a desktop application for batch geocache logging and bulk coordinate uploading on [Geocaching.com](https://www.geocaching.com).
 
-Unlike traditional browser automation tools that rely on slow browser rendering (Playwright/Selenium), GC Autologger communicates **directly with Geocaching.com's internal REST and tRPC batch APIs**, replicating the proven architecture of **c:geo**. 
+GC Autologger communicates directly with Geocaching.com's internal REST and tRPC batch APIs, replicating the proven architecture of **c:geo**.
 
 ---
 
@@ -30,7 +30,7 @@ Unlike traditional browser automation tools that rely on slow browser rendering 
   * *Needs archive* (with confirmation safeguard)
 * **Log Templates & Date Steppers**: Manage predefined log templates with card-based UI. Enter dates in `DD-MM-YYYY` with `▼` / `▲` daily stepper buttons and `Today` quick-set.
 
-### 🛡️ Anti-Detection & Safety Engine (Designed for 1000+ Caches)
+### 🛡️ Anti-Detection & Safety Engine
 * **Realistic Pacing & Jitter**: Configurable delay (0.7s – 1.2s) with randomized jitter prevents mechanical request patterns.
 * **Batch Breathers**: Automatically pauses every 50 caches (4.0s) to avoid triggering Cloudflare or rate-limiters.
 * **Genuine Browser Headers**: Sends authentic browser headers (`Sec-Ch-Ua`, `Referer` per cache, `Origin`, `X-Requested-With`).
@@ -42,7 +42,7 @@ Unlike traditional browser automation tools that rely on slow browser rendering 
 * **Ignore List**: Bulk-add hundreds of caches to your ignore bookmark list in seconds.
 
 ### 💻 Modern GUI + Terminal CLI
-* **CustomTkinter Dark Theme**: Sleek, responsive interface inspired by Spotify and Discord.
+* **CustomTkinter Dark Theme**: Responsive interface inspired by Spotify and Discord.
 * **Interactive Config & Accounts Editor**: Add, edit, remove accounts and adjust safety sliders directly from the GUI.
 * **Live Progress & Console**: Displays percentage progress, real-time ETA countdown, and color-coded logs.
 * **CLI Mode**: Full terminal interface available via `./start.sh --cli`.
@@ -126,4 +126,4 @@ gc_autologger/
 
 ## ⚖️ Disclaimer
 
-This tool is designed for personal use to manage your own geocaching logs and solved mystery coordinates. Please cache responsibly, respect rate limits, and adhere to the Geocaching.com Terms of Use.
+This tool is designed for personal use to manage your own geocaching logs and solved coordinates. It's not meant for bulk logging thousands of caches without ever signing a logbook. That would be pointless and against the rules. Geocaching also doesn't like automation very much, so use GC Autologger at your own risk.
