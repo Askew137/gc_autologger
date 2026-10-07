@@ -377,7 +377,7 @@ class UltimateApp:
 
         # Templates
         ctk.CTkLabel(left_box, text="Template:", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=10, pady=8, sticky="w")
-        templates = self.config.log_templates or ["Thanks for the cache!"]
+        templates = self.config.log_templates or ["TFTC."]
         self.combo_template = ctk.CTkComboBox(left_box, values=templates, width=320, command=self._on_template_selected)
         self.combo_template.grid(row=2, column=1, padx=10, pady=8, sticky="w")
 
@@ -464,9 +464,29 @@ class UltimateApp:
         self.lbl_copy_pwd = ctk.CTkLabel(grid, text="Target password:")
         self.entry_copy_pwd = ctk.CTkEntry(grid, width=220, show="*", placeholder_text="(Account password)")
 
-        ctk.CTkLabel(grid, text="Date (DD-MM-YYYY):").grid(row=4, column=0, padx=6, pady=6, sticky="w")
+        # Row 4: Start date (hidden unless Enter Date Range is checked)
+        self.lbl_copy_start_date = ctk.CTkLabel(grid, text="Start date (DD-MM-YYYY):")
+        self.start_date_box = ctk.CTkFrame(grid, fg_color="transparent")
+        self.entry_copy_start_date = ctk.CTkEntry(self.start_date_box, width=120)
+        self.entry_copy_start_date.pack(side="left")
+        ctk.CTkButton(
+            self.start_date_box,
+            text="▼",
+            width=28,
+            command=lambda: self._step_date(self.entry_copy_start_date, -1)
+        ).pack(side="left", padx=2)
+        ctk.CTkButton(
+            self.start_date_box,
+            text="▲",
+            width=28,
+            command=lambda: self._step_date(self.entry_copy_start_date, 1)
+        ).pack(side="left", padx=2)
+
+        # Row 5: Date (switches to 'End date' when range is enabled)
+        self.lbl_copy_main_date = ctk.CTkLabel(grid, text="Date (DD-MM-YYYY):")
+        self.lbl_copy_main_date.grid(row=5, column=0, padx=6, pady=6, sticky="w")
         date_box = ctk.CTkFrame(grid, fg_color="transparent")
-        date_box.grid(row=4, column=1, padx=6, pady=6, sticky="w")
+        date_box.grid(row=5, column=1, padx=6, pady=6, sticky="w")
         self.entry_copy_date = ctk.CTkEntry(date_box, width=120)
         self.entry_copy_date.insert(0, datetime.now().strftime("%d-%m-%Y"))
         self.entry_copy_date.pack(side="left")
@@ -488,6 +508,15 @@ class UltimateApp:
             width=28,
             command=lambda: self._step_date(self.entry_copy_date, 1)
         ).pack(side="left", padx=2)
+
+        self.var_date_range = ctk.BooleanVar(value=False)
+        self.chk_date_range = ctk.CTkCheckBox(
+            grid,
+            text="Enter date range",
+            variable=self.var_date_range,
+            command=self._toggle_date_range
+        )
+        self.chk_date_range.grid(row=5, column=2, padx=14, pady=6, sticky="w")
 
         # Trigger initial selection fill if accounts exist
         self._on_copy_account_selected(self.combo_copy_account.get())
@@ -1081,7 +1110,6 @@ class UltimateApp:
     def _start_copy_user_fetch(self):
         target_user = self.entry_copy_user.get().strip()
         target_pwd = self.entry_copy_pwd.get().strip() if self.var_password_mode.get() else None
-        target_date = self._parse_to_iso_date(self.entry_copy_date.get())
 
         if not target_user:
             messagebox.showwarning("Copy user", "Enter a target username.")
@@ -1091,15 +1119,55 @@ class UltimateApp:
             messagebox.showwarning("Copy user", "Password mode is enabled, but no password was entered.\nPlease enter a password or uncheck Password mode.")
             return
 
+        end_date_raw = self.entry_copy_date.get()
+        if self.var_date_range.get():
+            start_date_raw = self.entry_copy_start_date.get()
+            target_date = self._parse_to_iso_date(start_date_raw)
+            end_date = self._parse_to_iso_date(end_date_raw)
+        else:
+            target_date = self._parse_to_iso_date(end_date_raw)
+            end_date = None
+
         def worker():
             copier = UserLogCopier(self.client, self.safety)
-            codes = copier.fetch_user_logged_caches(target_user, target_pwd, target_date, on_log=self.log)
+            codes = copier.fetch_user_logged_caches(
+                target_user,
+                target_pwd,
+                target_date,
+                on_log=self.log,
+                end_date_str=end_date
+            )
             if codes:
                 self.root.after(0, lambda: self._insert_copied_codes(codes))
             else:
-                self.log(f"No caches found for '{target_user}' on {target_date}.", "warning")
+                range_txt = f"{target_date} to {end_date}" if end_date and target_date != end_date else target_date
+                self.log(f"No caches found for '{target_user}' on {range_txt}.", "warning")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _toggle_date_range(self):
+        if self.var_date_range.get():
+            self.lbl_copy_main_date.configure(text="End date (DD-MM-YYYY):")
+            self.lbl_copy_start_date.grid(row=4, column=0, padx=6, pady=6, sticky="w")
+            self.start_date_box.grid(row=4, column=1, padx=6, pady=6, sticky="w")
+
+            current_val = self.entry_copy_date.get().strip()
+            older_d = None
+            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+                try:
+                    older_d = datetime.strptime(current_val, fmt).date() - timedelta(days=1)
+                    break
+                except ValueError:
+                    pass
+            if not older_d:
+                older_d = datetime.now().date() - timedelta(days=1)
+
+            self.entry_copy_start_date.delete(0, "end")
+            self.entry_copy_start_date.insert(0, older_d.strftime("%d-%m-%Y"))
+        else:
+            self.lbl_copy_main_date.configure(text="Date (DD-MM-YYYY):")
+            self.lbl_copy_start_date.grid_remove()
+            self.start_date_box.grid_remove()
 
     def _toggle_password_mode(self):
         if self.var_password_mode.get():
@@ -1317,7 +1385,7 @@ class UltimateApp:
             if messagebox.askyesno("Delete template", f"Remove template #{index + 1}?\n\"{display_snip}\""):
                 self.config.log_templates.pop(index)
                 if not self.config.log_templates:
-                    self.config.log_templates = ["Thanks for the cache!"]
+                    self.config.log_templates = ["TFTC."]
                 self.config_mgr.save()
                 self._refresh_templates_view()
                 self.combo_template.configure(values=self.config.log_templates)

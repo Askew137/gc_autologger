@@ -50,5 +50,6 @@ report_*.txt
 cgeo source code/
 cgeo*/
 
-# Local conversation summary
+# Local conversation summary & one-off utility scripts
 PROJECT_SUMMARY.md
+export_missing_caches.py

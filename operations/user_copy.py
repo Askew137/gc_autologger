@@ -1,13 +1,13 @@
 """
 Orchestrates copying logs from another Geocaching user.
-Fetches the target user's logged caches for a given date,
+Fetches the target user's logged caches for a given date or date range,
 and submits them as Found logs for the active account.
 """
 
 import re
 import time
-from datetime import datetime
-from typing import List, Callable, Optional, Dict, Any
+from datetime import datetime, timedelta
+from typing import List, Callable, Optional, Dict, Any, Set
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 
@@ -24,11 +24,12 @@ class UserLogCopier:
         target_username: str,
         target_password: Optional[str],
         target_date_str: str,
-        on_log: Optional[Callable[[str, str], None]] = None
+        on_log: Optional[Callable[[str, str], None]] = None,
+        end_date_str: Optional[str] = None
     ) -> List[str]:
         """
-        Fetch all GC codes logged by target user on the specified date (YYYY-MM-DD).
-        If target_password is provided, uses browser session to scroll and load logs.
+        Fetch all GC codes logged by target user on the specified date or date range (inclusive).
+        If target_password is provided, uses direct HTTP session or browser session.
         """
         def log(msg: str, level: str = "info"):
             if on_log:
@@ -36,49 +37,76 @@ class UserLogCopier:
             else:
                 print(f"[{level.upper()}] {msg}")
 
-        log(f"Scanning logs for user '{target_username}' on {target_date_str}...", "info")
-
-        # Flexible date normalization (supports YYYY-MM-DD, YYYY-M-D, D.M.YYYY, etc.)
-        normalized_date = target_date_str.strip()
-        possible_date_formats = [normalized_date]
-        try:
-            clean = normalized_date.replace("/", "-").replace(".", "-").strip()
+        def parse_dt(d_str: str) -> Optional[datetime]:
+            if not d_str:
+                return None
+            clean = d_str.replace("/", "-").replace(".", "-").strip()
             parts = [int(p) for p in clean.split("-") if p.isdigit()]
             if len(parts) == 3:
                 if parts[0] > 1000:
-                    y, m, d = parts[0], parts[1], parts[2]
+                    return datetime(parts[0], parts[1], parts[2])
                 else:
-                    d, m, y = parts[0], parts[1], parts[2]
-                dt = datetime(y, m, d)
-                normalized_date = dt.strftime("%Y-%m-%d")
-                possible_date_formats = [
-                    f"{d}.{m}.{y}",
-                    f"{d}. {m}. {y}",
-                    f"{d:02d}.{m:02d}.{y}",
-                    f"{d:02d}. {m:02d}. {y}",
-                    f"{m}/{d}/{y}",
-                    f"{m:02d}/{d:02d}/{y}",
-                    normalized_date
-                ]
-        except Exception:
-            pass
+                    return datetime(parts[2], parts[1], parts[0])
+            return None
 
-        log(f"Scanning logs for user '{target_username}' on {normalized_date}...", "info")
+        dt1 = parse_dt(target_date_str) or datetime.now()
+        dt2 = parse_dt(end_date_str) if end_date_str else dt1
+        if not dt2:
+            dt2 = dt1
+
+        start_dt = min(dt1, dt2)
+        end_dt = max(dt1, dt2)
+        start_iso = start_dt.strftime("%Y-%m-%d")
+        end_iso = end_dt.strftime("%Y-%m-%d")
+        is_range = (start_dt.date() != end_dt.date())
+
+        # Precompute all dates in range
+        all_iso_dates: Set[str] = set()
+        possible_date_formats: Set[str] = set()
+        cur = start_dt
+        while cur.date() <= end_dt.date():
+            iso_str = cur.strftime("%Y-%m-%d")
+            all_iso_dates.add(iso_str)
+            d, m, y = cur.day, cur.month, cur.year
+            possible_date_formats.update([
+                f"{d}.{m}.{y}",
+                f"{d}. {m}. {y}",
+                f"{d:02d}.{m:02d}.{y}",
+                f"{d:02d}. {m:02d}. {y}",
+                f"{m}/{d}/{y}",
+                f"{m:02d}/{d:02d}/{y}",
+                iso_str
+            ])
+            cur += timedelta(days=1)
+
+        possible_date_formats_list = list(possible_date_formats)
+
+        if is_range:
+            days_count = (end_dt.date() - start_dt.date()).days + 1
+            log(f"Scanning logs for user '{target_username}' for date range {start_iso} to {end_iso} ({days_count} days inclusive)...", "info")
+        else:
+            log(f"Scanning logs for user '{target_username}' on {start_iso}...", "info")
 
         # If password is provided, try direct HTTP first, then fallback to Playwright
         if target_password:
-            http_result = self._fetch_via_authenticated_http(target_username, target_password, normalized_date, possible_date_formats, log)
+            http_result = self._fetch_via_authenticated_http(
+                target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log
+            )
             if http_result is not None:
                 return http_result
-            return self._fetch_via_browser(target_username, target_password, possible_date_formats, log)
+            return self._fetch_via_browser(
+                target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log
+            )
         else:
-            return self._fetch_via_public_api(target_username, normalized_date, log)
+            return self._fetch_via_public_api(target_username, start_iso, end_iso, log)
 
     def _fetch_via_authenticated_http(
         self,
         username: str,
         password: str,
-        target_date_iso: str,
+        start_iso: str,
+        end_iso: str,
+        all_iso_dates: Set[str],
         possible_date_formats: List[str],
         log: Callable[[str, str], None]
     ) -> Optional[List[str]]:
@@ -94,7 +122,8 @@ class UserLogCopier:
             if resp.status_code != 200 or "signin" in resp.url.lower():
                 return None
 
-            gc_codes = set()
+            gc_codes = []
+            seen_codes = set()
             rows = re.findall(r'<tr[^>]*>(.*?)</tr>', resp.text, re.DOTALL)
             for row in rows:
                 tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
@@ -111,17 +140,27 @@ class UserLogCopier:
                             else:
                                 row_iso_m = f"{parts[2]:04d}-{parts[0]:02d}-{parts[1]:02d}"
                                 row_iso_d = f"{parts[2]:04d}-{parts[1]:02d}-{parts[0]:02d}"
-                                if row_iso_m == target_date_iso:
+                                if row_iso_m in all_iso_dates:
                                     row_iso = row_iso_m
-                                elif row_iso_d == target_date_iso:
+                                elif row_iso_d in all_iso_dates:
                                     row_iso = row_iso_d
+                                else:
+                                    row_iso = row_iso_m
 
-                        if row_iso == target_date_iso or any(df == date_text or df in date_text for df in possible_date_formats):
-                            gc_codes.add(gc)
+                        is_match = False
+                        if row_iso and (start_iso <= row_iso <= end_iso):
+                            is_match = True
+                        elif any(df == date_text or df in date_text for df in possible_date_formats):
+                            is_match = True
 
-            found_list = sorted(list(gc_codes))
-            log(f"Direct HTTP scan finished: found {len(found_list)} unique GC codes.", "success" if found_list else "info")
-            return found_list
+                        if is_match and gc not in seen_codes:
+                            seen_codes.add(gc)
+                            gc_codes.append(gc)
+
+            # Table lists newest on top; reversing produces chronological trail order (oldest to newest)
+            gc_codes.reverse()
+            log(f"Direct HTTP scan finished: found {len(gc_codes)} unique GC codes in chronological trail order.", "success" if gc_codes else "info")
+            return gc_codes
         except Exception:
             return None
 
@@ -129,6 +168,9 @@ class UserLogCopier:
         self,
         username: str,
         password: str,
+        start_iso: str,
+        end_iso: str,
+        all_iso_dates: Set[str],
         possible_date_formats: List[str],
         log: Callable[[str, str], None]
     ) -> List[str]:
@@ -139,7 +181,8 @@ class UserLogCopier:
             log("Playwright not available for browser scanning. Please install playwright.", "error")
             return []
 
-        gc_codes = set()
+        gc_codes = []
+        seen_codes = set()
         log(f"Logging into '{username}' to read log history...", "info")
 
         try:
@@ -228,24 +271,36 @@ class UserLogCopier:
                     }''')
 
                     current_matches = set()
+                    earliest_seen_iso = None
                     for r in rows_data:
                         d_text = r['dateText']
+                        is_match = False
+                        row_iso = None
                         if any(df == d_text or df in d_text for df in possible_date_formats):
-                            current_matches.add(r['gccode'])
+                            is_match = True
                         else:
                             parts = [int(p) for p in re.findall(r'\d+', d_text)]
                             if len(parts) == 3:
-                                row_iso_m = f"{parts[2]:04d}-{parts[0]:02d}-{parts[1]:02d}"
-                                row_iso_d = f"{parts[2]:04d}-{parts[1]:02d}-{parts[0]:02d}"
-                                if any(df == row_iso_m or df == row_iso_d for df in possible_date_formats):
-                                    current_matches.add(r['gccode'])
+                                if parts[0] > 1000:
+                                    row_iso = f"{parts[0]:04d}-{parts[1]:02d}-{parts[2]:02d}"
+                                else:
+                                    row_iso_m = f"{parts[2]:04d}-{parts[0]:02d}-{parts[1]:02d}"
+                                    row_iso_d = f"{parts[2]:04d}-{parts[1]:02d}-{parts[0]:02d}"
+                                    row_iso = row_iso_m if row_iso_m in all_iso_dates else row_iso_d
+                                if row_iso and (start_iso <= row_iso <= end_iso):
+                                    is_match = True
 
-                    new_finds = current_matches - gc_codes
-                    gc_codes.update(current_matches)
+                        if row_iso:
+                            if not earliest_seen_iso or row_iso < earliest_seen_iso:
+                                earliest_seen_iso = row_iso
+
+                        if is_match and r['gccode'] not in seen_codes:
+                            seen_codes.add(r['gccode'])
+                            gc_codes.append(r['gccode'])
 
                     if len(rows_data) > last_count:
-                        if len(gc_codes) > 0 and len(new_finds) == 0:
-                            log("Target date passed. Finishing scan.", "info")
+                        if len(gc_codes) > 0 and earliest_seen_iso and earliest_seen_iso < start_iso:
+                            log("Target date range passed. Finishing scan.", "info")
                             break
 
                         last_count = len(rows_data)
@@ -262,9 +317,10 @@ class UserLogCopier:
 
                 browser.close()
 
-            found_list = sorted(list(gc_codes))
-            log(f"Scan finished: found {len(found_list)} unique GC codes.", "success")
-            return found_list
+            # Table lists newest on top; reversing produces chronological trail order (oldest to newest)
+            gc_codes.reverse()
+            log(f"Scan finished: found {len(gc_codes)} unique GC codes in chronological trail order.", "success")
+            return gc_codes
         except Exception as e:
             log(f"Browser scan error: {str(e)}", "error")
             return []
@@ -272,10 +328,11 @@ class UserLogCopier:
     def _fetch_via_public_api(
         self,
         username: str,
-        target_date_str: str,
+        start_iso: str,
+        end_iso: str,
         log: Callable[[str, str], None]
     ) -> List[str]:
-        """Fetch logs for target user on specific date using Geocaching search API."""
+        """Fetch logs for target user on specific date or date range using Geocaching search API."""
         try:
             url = f"{self.client.API_PROXY_URL}/web/search/v2"
             bearer = self.client.get_oauth_bearer_token()
@@ -286,9 +343,10 @@ class UserLogCopier:
             skip = 0
             take = 200
             matched_codes: List[str] = []
-            max_pages = 50  # Scan up to 10,000 logs (handles even massive 500+ powertrail days)
+            max_pages = 50  # Scan up to 10,000 logs
 
-            log(f"Searching caches found by '{username}' on {target_date_str}...", "info")
+            range_desc = f"{start_iso} to {end_iso}" if start_iso != end_iso else start_iso
+            log(f"Searching caches found by '{username}' in range {range_desc}...", "info")
 
             for page_num in range(1, max_pages + 1):
                 params = {
@@ -318,10 +376,10 @@ class UserLogCopier:
                         continue
                     date_part = lfd.split("T")[0]
                     code = item.get("code")
-                    if date_part == target_date_str:
+                    if start_iso <= date_part <= end_iso:
                         if code and code not in matched_codes:
                             matched_codes.append(code)
-                    elif date_part < target_date_str:
+                    elif date_part < start_iso:
                         passed_target = True
                         break
 
@@ -329,11 +387,13 @@ class UserLogCopier:
                     break
 
                 if len(matched_codes) > 0:
-                    log(f"Scanned {skip + len(results)} logs... found {len(matched_codes)} cache(s) on target date so far.", "info")
+                    log(f"Scanned {skip + len(results)} logs... found {len(matched_codes)} cache(s) in target range so far.", "info")
 
                 skip += take
 
-            log(f"Found {len(matched_codes)} cache(s) logged by '{username}' on {target_date_str}.", "info")
+            # Results arrive newest first; reversing produces chronological trail order (oldest to newest)
+            matched_codes.reverse()
+            log(f"Found {len(matched_codes)} cache(s) logged by '{username}' in range {range_desc} (chronological trail order).", "info")
             return matched_codes
         except Exception as e:
             log(f"Search API error: {str(e)}", "warning")

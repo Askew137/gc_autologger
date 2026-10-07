@@ -44,9 +44,9 @@ class AppConfig:
     accounts: List[AccountConfig] = field(default_factory=list)
     folder_path: str = ""
     log_templates: List[str] = field(default_factory=lambda: [
-        "Thanks for the cache!",
-        "Found during our geocaching trip. TFTC!",
-        "Quick and easy find. Greetings from Czech Republic!"
+        "TFTC.",
+        "DFDC.",
+        "Díky za keš."
     ])
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
