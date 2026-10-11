@@ -39,6 +39,7 @@ class CacheLogger:
         gc_codes: List[str],
         log_type_key: str,
         date_str: str,
+        log_text: str = "",
         skip_already_found: bool = True,
         omit_virtual_and_earth: bool = False,
         on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
