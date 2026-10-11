@@ -77,6 +77,59 @@ def cache_id_to_gc_code(cache_id: int) -> str:
     return "GC" + "".join(chars)
 
 
+def log_id_to_gl_code(log_id: int) -> str:
+    """
+    Convert numeric LogID to official GL reference code (e.g. 1387239624 -> 'GL1HEHGC7').
+    Replicates c:geo GCUtils.logIdToLogCode.
+    """
+    if log_id <= 0:
+        return ""
+
+    is_low_number = log_id <= 65535
+    base = GC_BASE16 if is_low_number else GC_BASE31
+    div_result = log_id if is_low_number else log_id + 411120
+
+    chars = []
+    while div_result > 0:
+        rest = div_result % base
+        div_result = div_result // base
+        chars.append(SEQUENCE_GCID[rest])
+
+    chars.reverse()
+    return "GL" + "".join(chars)
+
+
+def gl_code_to_log_id(gl_code: str) -> int:
+    """
+    Convert official GL reference code to numeric LogID.
+    """
+    if not gl_code:
+        return 0
+
+    clean = gl_code.strip().upper()
+    if clean.startswith("GL"):
+        clean = clean[2:]
+    if not clean:
+        return 0
+
+    if len(clean) < 4 or (len(clean) == 4 and MAP_GCID.get(clean[0], 0) < 16):
+        base = GC_BASE16
+    else:
+        base = GC_BASE31
+
+    lid = 0
+    for ch in clean:
+        idx = MAP_GCID.get(ch, -1)
+        if idx < 0:
+            return 0
+        lid = base * lid + idx
+
+    if base == GC_BASE31:
+        lid += (16 ** 4) - 16 * (31 ** 3)
+
+    return lid
+
+
 if __name__ == "__main__":
     # Test suite verified against c:geo unit tests (GCUtilsTest.java)
     test_cases = {

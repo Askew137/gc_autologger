@@ -5,6 +5,7 @@ Uses direct tRPC batch communication with safety pacing and live progress report
 """
 
 import time
+from datetime import datetime
 from typing import List, Callable, Optional, Dict, Any
 from core.client import GeocachingClient
 from core.safety import SafetyManager
@@ -146,6 +147,210 @@ class CacheLogger:
         }
 
         log(f"Logging complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        return summary
+
+    def run_edit_log(
+        self,
+        gc_codes: List[str],
+        log_type_key: Optional[str] = None,
+        date_str: Optional[str] = None,
+        log_text: Optional[str] = None,
+        keep_original_text: bool = False,
+        keep_original_type: bool = False,
+        keep_original_date: bool = False,
+        on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
+        on_log: Optional[Callable[[str, str], None]] = None
+    ) -> Dict[str, Any]:
+        """
+        Edit existing logs in bulk for multiple caches.
+        If keep_original_text is True (or log_text starts with '[Ponechat' or '[Keep'), retains each cache's existing text.
+        """
+        self.safety.reset()
+        total = len(gc_codes)
+        success_count = 0
+        failed_count = 0
+        failed_items: List[Dict[str, str]] = []
+
+        def log(msg: str, level: str = "info"):
+            if on_log:
+                on_log(msg, level)
+            else:
+                print(f"[{level.upper()}] {msg}")
+
+        log(f"Starting bulk edit for {total} cache log(s)...", "info")
+
+        if not self.client.ensure_valid_session():
+            log("Session is invalid. Please log in first.", "error")
+            return {"total": total, "success": 0, "failed": total, "failed_items": []}
+
+        start_time = time.time()
+        processed_times: List[float] = []
+
+        for idx, gc_code in enumerate(gc_codes, 1):
+            if self.safety.is_cancelled:
+                log(f"Edit cancelled by user at item {idx}/{total}.", "warning")
+                break
+
+            item_start = time.time()
+            clean_code = gc_code.strip().upper()
+            prefix = f"[{idx}/{total}] {clean_code}"
+
+            user_logs = self.client.get_user_logs_for_cache(clean_code)
+            if not user_logs:
+                failed_count += 1
+                failed_items.append({"gccode": clean_code, "reason": "No existing log found on your account"})
+                log(f"{prefix} ⏭️ No existing log found on your account to edit.", "warning")
+                percent = (idx / total) * 100
+                if on_progress:
+                    on_progress(idx, total, percent, None, clean_code)
+                continue
+
+            target_log = user_logs[0]
+            log_code = target_log["log_code"]
+
+            # Determine text
+            is_keep_text = (
+                keep_original_text
+                or not log_text
+                or log_text.startswith("[Ponechat")
+                or log_text.startswith("[Keep")
+            )
+            final_text = target_log["text"] if is_keep_text else log_text
+
+            # Determine type
+            if keep_original_type or not log_type_key or log_type_key == "KEEP_ORIGINAL":
+                final_type_id = target_log["log_type_id"]
+            else:
+                final_type_id = LOG_TYPE_MAP.get(log_type_key, target_log["log_type_id"])
+
+            # Determine date
+            if keep_original_date or not date_str:
+                final_iso = target_log["iso_date"] or f"{datetime.now().strftime('%Y-%m-%d')}T12:00:00.000Z"
+            else:
+                final_iso = f"{date_str}T12:00:00.000Z"
+
+            success, message = self.client.update_log(log_code, clean_code, final_type_id, final_iso, final_text)
+            if success:
+                success_count += 1
+                log(f"{prefix} ✅ Updated log ({log_code})", "success")
+            else:
+                failed_count += 1
+                failed_items.append({"gccode": clean_code, "reason": message})
+                log(f"{prefix} ❌ Edit failed: {message}", "error")
+
+            elapsed_item = time.time() - item_start
+            processed_times.append(elapsed_item)
+            avg_time = sum(processed_times[-10:]) / len(processed_times[-10:])
+            remaining_items = total - idx
+            eta = remaining_items * (avg_time + ((self.safety.min_delay + self.safety.max_delay) / 2))
+
+            percent = (idx / total) * 100
+            if on_progress:
+                on_progress(idx, total, percent, eta, clean_code)
+
+            if idx < total:
+                if not self.safety.wait_before_next(idx, total, log_callback=lambda m: log(m, "info")):
+                    break
+
+        total_elapsed = time.time() - start_time
+        summary = {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "failed_items": failed_items,
+            "elapsed_seconds": total_elapsed
+        }
+        log(f"Bulk edit complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        return summary
+
+    def run_delete_log(
+        self,
+        gc_codes: List[str],
+        on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
+        on_log: Optional[Callable[[str, str], None]] = None
+    ) -> Dict[str, Any]:
+        """
+        Delete existing logs in bulk for multiple caches.
+        """
+        self.safety.reset()
+        total = len(gc_codes)
+        success_count = 0
+        failed_count = 0
+        failed_items: List[Dict[str, str]] = []
+
+        def log(msg: str, level: str = "info"):
+            if on_log:
+                on_log(msg, level)
+            else:
+                print(f"[{level.upper()}] {msg}")
+
+        log(f"Starting bulk delete for {total} cache log(s)...", "info")
+
+        if not self.client.ensure_valid_session():
+            log("Session is invalid. Please log in first.", "error")
+            return {"total": total, "success": 0, "failed": total, "failed_items": []}
+
+        start_time = time.time()
+        processed_times: List[float] = []
+
+        for idx, gc_code in enumerate(gc_codes, 1):
+            if self.safety.is_cancelled:
+                log(f"Delete cancelled by user at item {idx}/{total}.", "warning")
+                break
+
+            item_start = time.time()
+            clean_code = gc_code.strip().upper()
+            prefix = f"[{idx}/{total}] {clean_code}"
+
+            user_logs = self.client.get_user_logs_for_cache(clean_code)
+            if not user_logs:
+                failed_count += 1
+                failed_items.append({"gccode": clean_code, "reason": "No existing log found on your account"})
+                log(f"{prefix} ⏭️ No existing log found on your account to delete.", "warning")
+                percent = (idx / total) * 100
+                if on_progress:
+                    on_progress(idx, total, percent, None, clean_code)
+                continue
+
+            all_deleted = True
+            for entry in user_logs:
+                log_code = entry["log_code"]
+                success, message = self.client.delete_log(log_code)
+                if success:
+                    log(f"{prefix} 🗑️ Deleted log ({log_code})", "success")
+                else:
+                    all_deleted = False
+                    failed_items.append({"gccode": clean_code, "reason": message})
+                    log(f"{prefix} ❌ Delete failed for {log_code}: {message}", "error")
+
+            if all_deleted:
+                success_count += 1
+            else:
+                failed_count += 1
+
+            elapsed_item = time.time() - item_start
+            processed_times.append(elapsed_item)
+            avg_time = sum(processed_times[-10:]) / len(processed_times[-10:])
+            remaining_items = total - idx
+            eta = remaining_items * (avg_time + ((self.safety.min_delay + self.safety.max_delay) / 2))
+
+            percent = (idx / total) * 100
+            if on_progress:
+                on_progress(idx, total, percent, eta, clean_code)
+
+            if idx < total:
+                if not self.safety.wait_before_next(idx, total, log_callback=lambda m: log(m, "info")):
+                    break
+
+        total_elapsed = time.time() - start_time
+        summary = {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "failed_items": failed_items,
+            "elapsed_seconds": total_elapsed
+        }
+        log(f"Bulk delete complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
         return summary
 
     def run_ignore(

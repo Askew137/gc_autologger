@@ -350,50 +350,85 @@ class UltimateApp:
     # --------------------------------------------------------------------------
 
     def _build_tab_logger(self):
+        # Action mode selector (Create logs / Edit logs / Delete logs)
+        mode_frame = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
+        mode_frame.pack(fill="x", padx=14, pady=(8, 4))
+
+        ctk.CTkLabel(mode_frame, text="Action:", font=ctk.CTkFont(weight="bold", size=13)).pack(side="left", padx=(0, 10))
+
+        self.logger_mode_var = ctk.StringVar(value="CREATE")
+        self.logger_mode_seg = ctk.CTkSegmentedButton(
+            mode_frame,
+            values=["Create logs", "Edit logs", "Delete logs"],
+            command=self._on_logger_mode_changed
+        )
+        self.logger_mode_seg.set("Create logs")
+        self.logger_mode_seg.pack(side="left")
+
         log_grid = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
-        log_grid.pack(fill="both", expand=True, padx=8, pady=8)
+        log_grid.pack(fill="both", expand=True, padx=8, pady=4)
 
         # Left side: inputs
-        left_box = ctk.CTkFrame(log_grid)
-        left_box.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        self.logger_left_box = ctk.CTkFrame(log_grid)
+        self.logger_left_box.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+
+        # Delete mode informational frame (shown only in Delete mode)
+        self.frame_delete_info = ctk.CTkFrame(
+            self.logger_left_box,
+            fg_color="#3b1d1d",
+            border_width=1,
+            border_color="#ef4444",
+            corner_radius=6
+        )
+        ctk.CTkLabel(
+            self.frame_delete_info,
+            text="🗑️ Delete Mode:\nPermanently deletes your existing logs on Geocaching.com\nfor all listed GC codes.\n\nNo date, type, or log text input required.",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#fca5a5",
+            justify="left"
+        ).pack(padx=16, pady=20)
 
         # Log Type
-        ctk.CTkLabel(left_box, text="Log type:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=8, sticky="w")
+        self.lbl_log_type = ctk.CTkLabel(self.logger_left_box, text="Log type:", font=ctk.CTkFont(weight="bold"))
+        self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
         type_options = list(LOG_TYPE_NAMES.values())
-        self.combo_log_type = ctk.CTkComboBox(left_box, values=type_options, width=200)
+        self.combo_log_type = ctk.CTkComboBox(self.logger_left_box, values=type_options, width=200)
         self.combo_log_type.set("Found it")
         self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
 
         # Date
-        ctk.CTkLabel(left_box, text="Log date (DD-MM-YYYY):", font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, padx=10, pady=8, sticky="w")
-        date_box = ctk.CTkFrame(left_box, fg_color="transparent")
-        date_box.grid(row=1, column=1, padx=10, pady=8, sticky="w")
-        self.entry_date = ctk.CTkEntry(date_box, width=120)
+        self.lbl_log_date = ctk.CTkLabel(self.logger_left_box, text="Log date (DD-MM-YYYY):", font=ctk.CTkFont(weight="bold"))
+        self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
+        self.date_box = ctk.CTkFrame(self.logger_left_box, fg_color="transparent")
+        self.date_box.grid(row=1, column=1, padx=10, pady=8, sticky="w")
+        self.entry_date = ctk.CTkEntry(self.date_box, width=120)
         self.entry_date.insert(0, datetime.now().strftime("%d-%m-%Y"))
         self.entry_date.pack(side="left")
-        ctk.CTkButton(date_box, text="Today", width=55, command=lambda: self._set_date_today(self.entry_date)).pack(side="left", padx=3)
-        ctk.CTkButton(date_box, text="▼", width=28, command=lambda: self._step_date(self.entry_date, -1)).pack(side="left", padx=2)
-        ctk.CTkButton(date_box, text="▲", width=28, command=lambda: self._step_date(self.entry_date, 1)).pack(side="left", padx=2)
+        ctk.CTkButton(self.date_box, text="Today", width=55, command=lambda: self._set_date_today(self.entry_date)).pack(side="left", padx=3)
+        ctk.CTkButton(self.date_box, text="▼", width=28, command=lambda: self._step_date(self.entry_date, -1)).pack(side="left", padx=2)
+        ctk.CTkButton(self.date_box, text="▲", width=28, command=lambda: self._step_date(self.entry_date, 1)).pack(side="left", padx=2)
 
         # Templates
-        ctk.CTkLabel(left_box, text="Template:", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=10, pady=8, sticky="w")
+        self.lbl_log_tmpl = ctk.CTkLabel(self.logger_left_box, text="Template:", font=ctk.CTkFont(weight="bold"))
+        self.lbl_log_tmpl.grid(row=2, column=0, padx=10, pady=8, sticky="w")
         templates = self.config.log_templates or ["TFTC."]
-        self.combo_template = ctk.CTkComboBox(left_box, values=templates, width=320, command=self._on_template_selected)
+        self.combo_template = ctk.CTkComboBox(self.logger_left_box, values=templates, width=320, command=self._on_template_selected)
         self.combo_template.grid(row=2, column=1, padx=10, pady=8, sticky="w")
 
-        # Log Text Box
-        ctk.CTkLabel(left_box, text="Log text:", font=ctk.CTkFont(weight="bold")).grid(row=3, column=0, padx=10, pady=4, sticky="nw")
-        self.txt_log_message = ctk.CTkTextbox(left_box, height=120)
+        # Log Text Box (with wrap="word" so words remain whole)
+        self.lbl_log_msg = ctk.CTkLabel(self.logger_left_box, text="Log text:", font=ctk.CTkFont(weight="bold"))
+        self.lbl_log_msg.grid(row=3, column=0, padx=10, pady=4, sticky="nw")
+        self.txt_log_message = ctk.CTkTextbox(self.logger_left_box, height=120, wrap="word")
         self.txt_log_message.grid(row=3, column=1, padx=10, pady=4, sticky="nsew")
         if templates:
             self.txt_log_message.insert("1.0", templates[0])
 
-        # Right side: Target GC codes
+        # Right side: Target GC codes (with wrap="word")
         right_box = ctk.CTkFrame(log_grid)
         right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
         ctk.CTkLabel(right_box, text="Target GC codes (from GPX or paste here):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=6)
-        self.txt_gc_codes = ctk.CTkTextbox(right_box, height=170)
+        self.txt_gc_codes = ctk.CTkTextbox(right_box, height=170, wrap="word")
         self.txt_gc_codes.pack(fill="both", expand=True, padx=10, pady=4)
 
         btn_row = ctk.CTkFrame(right_box, fg_color="transparent")
@@ -413,6 +448,82 @@ class UltimateApp:
         )
         self.btn_log_start.pack(anchor="w", padx=14, pady=8)
 
+    def _on_logger_mode_changed(self, mode_val: str):
+        if mode_val == "Create logs":
+            self.logger_mode_var.set("CREATE")
+            self.frame_delete_info.grid_remove()
+            self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
+            self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
+            self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
+            self.date_box.grid(row=1, column=1, padx=10, pady=8, sticky="w")
+            self.lbl_log_tmpl.grid(row=2, column=0, padx=10, pady=8, sticky="w")
+            self.combo_template.grid(row=2, column=1, padx=10, pady=8, sticky="w")
+            self.lbl_log_msg.grid(row=3, column=0, padx=10, pady=4, sticky="nw")
+            self.txt_log_message.grid(row=3, column=1, padx=10, pady=4, sticky="nsew")
+
+            type_options = list(LOG_TYPE_NAMES.values())
+            self.combo_log_type.configure(values=type_options)
+            if self.combo_log_type.get() not in type_options:
+                self.combo_log_type.set("Found it")
+
+            templates = self.config.log_templates or ["TFTC."]
+            self.combo_template.configure(values=templates)
+            self.combo_template.set(templates[0])
+            self.txt_log_message.delete("1.0", "end")
+            self.txt_log_message.insert("1.0", templates[0])
+
+            self.btn_log_start.configure(
+                text="▶ Start bulk logging",
+                fg_color=theme.ACCENT_GREEN,
+                hover_color=theme.ACCENT_GREEN_HOVER
+            )
+
+        elif mode_val == "Edit logs":
+            self.logger_mode_var.set("EDIT")
+            self.frame_delete_info.grid_remove()
+            self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
+            self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
+            self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
+            self.date_box.grid(row=1, column=1, padx=10, pady=8, sticky="w")
+            self.lbl_log_tmpl.grid(row=2, column=0, padx=10, pady=8, sticky="w")
+            self.combo_template.grid(row=2, column=1, padx=10, pady=8, sticky="w")
+            self.lbl_log_msg.grid(row=3, column=0, padx=10, pady=4, sticky="nw")
+            self.txt_log_message.grid(row=3, column=1, padx=10, pady=4, sticky="nsew")
+
+            type_options = ["[Ponechat původní]"] + list(LOG_TYPE_NAMES.values())
+            self.combo_log_type.configure(values=type_options)
+            self.combo_log_type.set("[Ponechat původní]")
+
+            tmpl_options = ["[Ponechat původní]"] + (self.config.log_templates or ["TFTC."])
+            self.combo_template.configure(values=tmpl_options)
+            self.combo_template.set("[Ponechat původní]")
+            self.txt_log_message.delete("1.0", "end")
+            self.txt_log_message.insert("1.0", "[Ponechat původní]")
+
+            self.btn_log_start.configure(
+                text="✏️ Start editing logs",
+                fg_color=theme.ACCENT_BLUE,
+                hover_color=theme.ACCENT_BLUE_HOVER
+            )
+
+        elif mode_val == "Delete logs":
+            self.logger_mode_var.set("DELETE")
+            self.lbl_log_type.grid_remove()
+            self.combo_log_type.grid_remove()
+            self.lbl_log_date.grid_remove()
+            self.date_box.grid_remove()
+            self.lbl_log_tmpl.grid_remove()
+            self.combo_template.grid_remove()
+            self.lbl_log_msg.grid_remove()
+            self.txt_log_message.grid_remove()
+
+            self.frame_delete_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
+
+            self.btn_log_start.configure(
+                text="🗑️ Delete logs",
+                fg_color=theme.ACCENT_RED,
+                hover_color=theme.ACCENT_RED_HOVER
+            )
     # --------------------------------------------------------------------------
     # Tab 3: Copy User
     # --------------------------------------------------------------------------
@@ -548,7 +659,7 @@ class UltimateApp:
         # Text input & review
         ctk.CTkLabel(box, text="GC codes to ignore (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
 
-        self.txt_ignore_codes = ctk.CTkTextbox(box, height=160)
+        self.txt_ignore_codes = ctk.CTkTextbox(box, height=160, wrap="word")
         self.txt_ignore_codes.pack(fill="both", expand=True, padx=14, pady=4)
 
         btn_row = ctk.CTkFrame(box, fg_color="transparent")
@@ -724,9 +835,21 @@ class UltimateApp:
                 width=65,
                 height=26,
                 fg_color=theme.ACCENT_RED,
+                hover_color=theme.ACCENT_RED_HOVER,
                 command=lambda a_id=acc.id: self._on_delete_account(a_id)
             )
-            del_btn.pack(side="right", padx=6)
+            del_btn.pack(side="right", padx=4)
+
+            edit_btn = ctk.CTkButton(
+                row,
+                text="Edit",
+                width=55,
+                height=26,
+                fg_color=theme.ACCENT_BLUE,
+                hover_color=theme.ACCENT_BLUE_HOVER,
+                command=lambda a_id=acc.id: self._on_edit_account(a_id)
+            )
+            edit_btn.pack(side="right", padx=4)
 
             if not acc.is_default:
                 set_def_btn = ctk.CTkButton(
@@ -737,6 +860,80 @@ class UltimateApp:
                     command=lambda a_id=acc.id: self._on_set_default_account(a_id)
                 )
                 set_def_btn.pack(side="right", padx=4)
+
+    def _center_toplevel(self, toplevel, width: int, height: int):
+        self.root.update_idletasks()
+        rx = self.root.winfo_x()
+        ry = self.root.winfo_y()
+        rw = self.root.winfo_width()
+        rh = self.root.winfo_height()
+        x = max(0, rx + (rw - width) // 2)
+        y = max(0, ry + (rh - height) // 2)
+        toplevel.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _on_edit_account(self, acc_id: str):
+        target_acc = next((a for a in self.config.accounts if a.id == acc_id), None)
+        if not target_acc:
+            return
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Edit account")
+        dialog.geometry("380x280")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        self._center_toplevel(dialog, 380, 280)
+
+        ctk.CTkLabel(dialog, text=f"Edit account #{target_acc.id}", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(16, 12))
+
+        form = ctk.CTkFrame(dialog, fg_color="transparent")
+        form.pack(fill="x", padx=24, pady=4)
+
+        ctk.CTkLabel(form, text="Username:").grid(row=0, column=0, sticky="w", pady=6)
+        entry_user = ctk.CTkEntry(form, width=200)
+        entry_user.insert(0, target_acc.username)
+        entry_user.grid(row=0, column=1, pady=6, padx=(8, 0))
+
+        ctk.CTkLabel(form, text="Password:").grid(row=1, column=0, sticky="w", pady=6)
+        entry_pwd = ctk.CTkEntry(form, width=200, show="*")
+        if target_acc.password:
+            entry_pwd.insert(0, target_acc.password)
+        entry_pwd.grid(row=1, column=1, pady=6, padx=(8, 0))
+
+        var_default = ctk.BooleanVar(value=target_acc.is_default)
+        chk_def = ctk.CTkCheckBox(form, text="Default account", variable=var_default)
+        chk_def.grid(row=2, column=1, sticky="w", pady=10, padx=(8, 0))
+
+        btn_box = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_box.pack(pady=16)
+
+        def save():
+            new_user = entry_user.get().strip()
+            if not new_user:
+                messagebox.showwarning("Account", "Username cannot be empty.", parent=dialog)
+                return
+            new_pwd = entry_pwd.get().strip()
+            old_user = target_acc.username
+            target_acc.username = new_user
+            target_acc.password = new_pwd
+
+            if var_default.get():
+                for a in self.config.accounts:
+                    a.is_default = (a.id == target_acc.id)
+            elif target_acc.is_default:
+                if len(self.config.accounts) == 1:
+                    target_acc.is_default = True
+
+            self.config_mgr.save()
+            self._refresh_accounts_view()
+            self._refresh_header_combo()
+            self._refresh_copy_account_combo()
+            self.log(f"Account '{old_user}' updated to '{new_user}'.", "success")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_box, text="Save", width=100, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=save).pack(side="left", padx=6)
+        ctk.CTkButton(btn_box, text="Cancel", width=80, fg_color=theme.CARD_BORDER, command=dialog.destroy).pack(side="left", padx=6)
 
     # --------------------------------------------------------------------------
     # Bottom Panel: Progress & Real-time Console Log
@@ -767,7 +964,7 @@ class UltimateApp:
         ctk.CTkButton(log_header, text="Export log", width=75, height=20, command=self._export_console).pack(side="right", padx=4)
 
         # Text Console
-        self.txt_console = ctk.CTkTextbox(self.bottom_frame, height=125, font=("Courier", 12))
+        self.txt_console = ctk.CTkTextbox(self.bottom_frame, height=125, font=("Courier", 12), wrap="word")
         self.txt_console.pack(fill="both", expand=True, padx=10, pady=(4, 8))
 
     # --------------------------------------------------------------------------
@@ -1062,7 +1259,83 @@ class UltimateApp:
         if self.is_running:
             return
 
-        # Find internal log type key
+        mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
+
+        # 1. DELETE Mode
+        if mode == "DELETE":
+            if not messagebox.askyesno(
+                "Confirm delete logs",
+                f"Are you sure you want to permanently delete your log(s) for {len(codes)} cache(s)?\n\nThis cannot be undone. Continue?"
+            ):
+                return
+
+            self.is_running = True
+            self.btn_log_start.configure(state="disabled")
+            self.progress_bar.set(0)
+
+            logger = CacheLogger(self.client, self.safety)
+
+            def on_progress_del(idx, total, pct, eta, gc_code):
+                self.root.after(0, lambda: self._update_progress_ui(idx, total, pct, eta, f"Deleting {gc_code}"))
+
+            def worker_delete():
+                try:
+                    res = logger.run_delete_log(
+                        codes,
+                        on_progress=on_progress_del,
+                        on_log=self.log
+                    )
+                    self.root.after(0, lambda: self._on_operation_done("Bulk delete logs", res))
+                finally:
+                    self.root.after(0, self._reset_controls)
+
+            threading.Thread(target=worker_delete, daemon=True).start()
+            return
+
+        # 2. EDIT Mode
+        if mode == "EDIT":
+            display_name = self.combo_log_type.get()
+            keep_type = (display_name == "[Ponechat původní]")
+            type_key = None
+            if not keep_type:
+                for k, v in LOG_TYPE_NAMES.items():
+                    if v == display_name:
+                        type_key = k
+                        break
+
+            date_str = self._parse_to_iso_date(self.entry_date.get())
+            log_text = self.txt_log_message.get("1.0", "end").strip()
+            keep_text = (log_text == "[Ponechat původní]" or not log_text)
+
+            self.is_running = True
+            self.btn_log_start.configure(state="disabled")
+            self.progress_bar.set(0)
+
+            logger = CacheLogger(self.client, self.safety)
+
+            def on_progress_edit(idx, total, pct, eta, gc_code):
+                self.root.after(0, lambda: self._update_progress_ui(idx, total, pct, eta, f"Editing {gc_code}"))
+
+            def worker_edit():
+                try:
+                    res = logger.run_edit_log(
+                        codes,
+                        log_type_key=type_key,
+                        date_str=date_str,
+                        log_text=log_text,
+                        keep_original_text=keep_text,
+                        keep_original_type=keep_type,
+                        on_progress=on_progress_edit,
+                        on_log=self.log
+                    )
+                    self.root.after(0, lambda: self._on_operation_done("Bulk edit logs", res))
+                finally:
+                    self.root.after(0, self._reset_controls)
+
+            threading.Thread(target=worker_edit, daemon=True).start()
+            return
+
+        # 3. CREATE Mode
         display_name = self.combo_log_type.get()
         type_key = "FOUND"
         for k, v in LOG_TYPE_NAMES.items():
@@ -1359,9 +1632,65 @@ class UltimateApp:
                 width=65,
                 height=26,
                 fg_color=theme.ACCENT_RED,
+                hover_color=theme.ACCENT_RED_HOVER,
                 command=lambda t_idx=idx-1: self._on_delete_template(t_idx)
             )
-            del_btn.pack(side="right", padx=6)
+            del_btn.pack(side="right", padx=4)
+
+            edit_btn = ctk.CTkButton(
+                row,
+                text="Edit",
+                width=55,
+                height=26,
+                fg_color=theme.ACCENT_BLUE,
+                hover_color=theme.ACCENT_BLUE_HOVER,
+                command=lambda t_idx=idx-1: self._on_edit_template(t_idx)
+            )
+            edit_btn.pack(side="right", padx=4)
+
+    def _on_edit_template(self, index: int):
+        if not (0 <= index < len(self.config.log_templates)):
+            return
+
+        current_val = self.config.log_templates[index]
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(f"Edit template #{index + 1}")
+        dialog.geometry("450x300")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        self._center_toplevel(dialog, 450, 300)
+
+        ctk.CTkLabel(dialog, text=f"Edit template #{index + 1}", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
+
+        txt_tmpl = ctk.CTkTextbox(dialog, height=150, wrap="word")
+        txt_tmpl.pack(fill="both", expand=True, padx=20, pady=4)
+        txt_tmpl.insert("1.0", current_val)
+
+        btn_box = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_box.pack(pady=12)
+
+        def save():
+            new_text = txt_tmpl.get("1.0", "end").strip()
+            if not new_text:
+                messagebox.showwarning("Log template", "Template text cannot be empty.", parent=dialog)
+                return
+            self.config.log_templates[index] = new_text
+            self.config_mgr.save()
+            self._refresh_templates_view()
+            if hasattr(self, "combo_template"):
+                mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
+                if mode == "EDIT":
+                    self.combo_template.configure(values=["[Ponechat původní]"] + self.config.log_templates)
+                else:
+                    self.combo_template.configure(values=self.config.log_templates)
+            self.log(f"Updated template #{index + 1}.", "success")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_box, text="Save", width=100, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=save).pack(side="left", padx=6)
+        ctk.CTkButton(btn_box, text="Cancel", width=80, fg_color=theme.CARD_BORDER, command=dialog.destroy).pack(side="left", padx=6)
 
     def _on_add_template(self):
         t = self.new_tmpl_entry.get().strip()

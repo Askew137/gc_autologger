@@ -18,7 +18,7 @@ try:
 except ImportError:
     requests = None
 
-from core.converter import gc_code_to_cache_id
+from core.converter import gc_code_to_cache_id, log_id_to_gl_code
 
 
 class GeocachingClient:
@@ -629,6 +629,221 @@ class GeocachingClient:
             return False, f"Server returned HTTP {resp.status_code}: {resp.text[:120]}"
         except Exception as e:
             return False, f"Error posting log: {str(e)}"
+
+    def get_user_logs_for_cache(self, gc_code: str) -> List[Dict[str, Any]]:
+        """
+        Fetch the authenticated user's own log(s) for a specific cache.
+        Replicates c:geo GCParser.getLogs(userToken, Logs.OWN).
+        Returns a list of dicts:
+          {
+            "log_id": int,
+            "log_code": str (e.g. "GL1HEHGC7"),
+            "log_type_id": int (e.g. 2 for Found),
+            "log_type": str (e.g. "Found it"),
+            "date": str (e.g. "2026-09-30"),
+            "iso_date": str (e.g. "2026-09-30T12:00:00.000Z"),
+            "text": str (cleaned plain text),
+            "raw_text": str (HTML)
+          }
+        """
+        clean_code = gc_code.strip().upper()
+        try:
+            # 1. Fetch userToken from cache page
+            listing_url = f"{self.BASE_URL}/geocache/{clean_code}?decrypt=y"
+            resp = self.session.get(listing_url, timeout=12)
+            if resp.status_code != 200:
+                return []
+
+            token_match = re.search(r"userToken\s*=\s*'([^']+)'", resp.text)
+            if not token_match:
+                return []
+            user_token = token_match.group(1)
+
+            # 2. Query geocache.logbook with sp=true (show personal/own logs)
+            logbook_url = f"{self.BASE_URL}/seek/geocache.logbook"
+            params = {
+                "tkn": user_token,
+                "idx": "1",
+                "num": "50",
+                "decrypt": "false",
+                "sp": "true"
+            }
+            lb_resp = self.session.get(logbook_url, params=params, timeout=12)
+            if lb_resp.status_code != 200:
+                return []
+
+            data = lb_resp.json()
+            if data.get("status") != "success":
+                return []
+
+            entries = data.get("data", [])
+            results = []
+            for entry in entries:
+                log_id = entry.get("LogID")
+                if not log_id:
+                    continue
+                gl_code = log_id_to_gl_code(int(log_id))
+                raw_text = entry.get("LogText") or ""
+                # Clean HTML tags from log text
+                clean_text = html.unescape(raw_text)
+                clean_text = re.sub(r'</p>\s*<p[^>]*>', '\n\n', clean_text, flags=re.IGNORECASE)
+                clean_text = re.sub(r'<br\s*/?>', '\n', clean_text, flags=re.IGNORECASE)
+                clean_text = re.sub(r'<[^>]+>', '', clean_text).strip()
+
+                visited = entry.get("Visited") or entry.get("Created") or ""
+                parsed_date = ""
+                iso_date = ""
+                if visited:
+                    parts = [int(p) for p in re.findall(r'\d+', visited)]
+                    if len(parts) >= 3:
+                        if parts[0] > 1000:
+                            parsed_date = f"{parts[0]:04d}-{parts[1]:02d}-{parts[2]:02d}"
+                        else:
+                            parsed_date = f"{parts[2]:04d}-{parts[0]:02d}-{parts[1]:02d}"
+                        iso_date = f"{parsed_date}T12:00:00.000Z"
+
+                results.append({
+                    "log_id": log_id,
+                    "log_code": gl_code,
+                    "log_type_id": entry.get("LogTypeID", 2),
+                    "log_type": entry.get("LogType", "Found it"),
+                    "date": parsed_date,
+                    "iso_date": iso_date,
+                    "text": clean_text,
+                    "raw_text": raw_text,
+                    "author": entry.get("UserName", "")
+                })
+            return results
+        except Exception:
+            return []
+
+    def update_log(
+        self,
+        log_code: str,
+        gc_code: str,
+        log_type_id: int,
+        date_iso: str,
+        text: str
+    ) -> Tuple[bool, str]:
+        """
+        Update an existing log entry via tRPC batch endpoint.
+        Replicates c:geo GCLogAPI.java:editLog.
+        """
+        bearer = self.get_oauth_bearer_token()
+        csrf = self.get_csrf_token()
+
+        if not csrf:
+            return False, "Failed to retrieve CSRF token."
+
+        headers = {
+            "CSRF-Token": csrf,
+            "Content-Type": "application/json",
+            "Referer": f"{self.BASE_URL}/live/geocache/{gc_code}/log/{log_code}/edit"
+        }
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        body = {
+            "0": {
+                "referenceCode": log_code,
+                "body": {
+                    "images": [],
+                    "logDate": date_iso,
+                    "logText": text,
+                    "logType": log_type_id,
+                    "trackables": [],
+                    "geocacheReferenceCode": "",
+                    "usedFavoritePoint": False
+                }
+            }
+        }
+
+        url = f"{self.TRPC_UPDATE_LOG_URL}?batch=1"
+
+        try:
+            resp = self.session.post(url, headers=headers, json=body, timeout=15)
+            if resp.status_code in [200, 201]:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    item = data[0]
+                    if "error" in item:
+                        err_msg = item["error"].get("json", {}).get("message", "Unknown API error")
+                        return False, f"API error: {err_msg}"
+                    result = item.get("result", {}).get("data", {})
+                    ref_code = result.get("logReferenceCode", log_code)
+                    return True, f"Log {ref_code} updated successfully"
+                return True, "Log updated successfully"
+
+            if resp.status_code in [401, 403]:
+                if self.ensure_valid_session():
+                    headers["CSRF-Token"] = self.get_csrf_token(force_refresh=True) or ""
+                    headers["Authorization"] = f"Bearer {self.get_oauth_bearer_token(force_refresh=True)}"
+                    resp2 = self.session.post(url, headers=headers, json=body, timeout=15)
+                    if resp2.status_code in [200, 201]:
+                        data2 = resp2.json()
+                        if isinstance(data2, list) and len(data2) > 0 and "error" not in data2[0]:
+                            return True, "Log updated successfully after re-auth"
+
+            return False, f"Server returned HTTP {resp.status_code}: {resp.text[:120]}"
+        except Exception as e:
+            return False, f"Error updating log: {str(e)}"
+
+    def delete_log(
+        self,
+        log_code: str,
+        reason_text: str = "Deleted via GC Autologger"
+    ) -> Tuple[bool, str]:
+        """
+        Delete an existing log entry via tRPC batch endpoint.
+        Replicates c:geo GCLogAPI.java:deleteLog.
+        """
+        bearer = self.get_oauth_bearer_token()
+        csrf = self.get_csrf_token()
+
+        if not csrf:
+            return False, "Failed to retrieve CSRF token."
+
+        headers = {
+            "CSRF-Token": csrf,
+            "Content-Type": "application/json",
+            "Referer": f"{self.BASE_URL}/live/log/{log_code}"
+        }
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        body = {
+            "0": {
+                "referenceCode": log_code,
+                "reasonText": reason_text
+            }
+        }
+
+        url = f"{self.TRPC_DELETE_LOG_URL}?batch=1"
+
+        try:
+            resp = self.session.post(url, headers=headers, json=body, timeout=15)
+            if resp.status_code in [200, 201]:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    item = data[0]
+                    if "error" in item:
+                        err_msg = item["error"].get("json", {}).get("message", "Unknown API error")
+                        return False, f"API error: {err_msg}"
+                return True, f"Log {log_code} deleted successfully"
+
+            if resp.status_code in [401, 403]:
+                if self.ensure_valid_session():
+                    headers["CSRF-Token"] = self.get_csrf_token(force_refresh=True) or ""
+                    headers["Authorization"] = f"Bearer {self.get_oauth_bearer_token(force_refresh=True)}"
+                    resp2 = self.session.post(url, headers=headers, json=body, timeout=15)
+                    if resp2.status_code in [200, 201]:
+                        data2 = resp2.json()
+                        if isinstance(data2, list) and len(data2) > 0 and "error" not in data2[0]:
+                            return True, "Log deleted successfully after re-auth"
+
+            return False, f"Server returned HTTP {resp.status_code}: {resp.text[:120]}"
+        except Exception as e:
+            return False, f"Error deleting log: {str(e)}"
 
     def get_cache_details(self, gc_code: str) -> Optional[Dict[str, Any]]:
         """
