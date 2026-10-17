@@ -7,6 +7,7 @@ Modern dark palette inspired by Spotify / Discord.
 DARK_BG = "#121212"
 CARD_BG = "#1e1e1e"
 CARD_BORDER = "#2a2a2a"
+BG_TERTIARY = "#2a2a2a"
 HEADER_BG = "#181818"
 ACCENT_GREEN = "#1db954"        # Spotify green
 ACCENT_GREEN_HOVER = "#1aa34a"
