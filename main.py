@@ -17,6 +17,18 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
+# Enable Windows DPI awareness to eliminate UI blurriness and hover lag
+if sys.platform.startswith("win"):
+    try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
 def main():
     if "--cli" in sys.argv:
         from cli import run_cli

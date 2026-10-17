@@ -19,6 +19,7 @@ except ImportError:
     requests = None
 
 from core.converter import gc_code_to_cache_id, log_id_to_gl_code
+from core.config import get_base_dir
 
 
 class GeocachingClient:
@@ -54,7 +55,7 @@ class GeocachingClient:
         })
 
         if not cookies_file_path:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = get_base_dir()
             cookies_file_path = os.path.join(base_dir, "session_cookies.json")
         self.cookies_file_path = cookies_file_path
 

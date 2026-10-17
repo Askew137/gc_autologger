@@ -22,7 +22,7 @@ except ImportError:
     ctk = None
     CTK_AVAILABLE = False
 
-from core.config import ConfigManager, AccountConfig
+from core.config import ConfigManager, AccountConfig, get_base_dir, get_bundle_dir
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
@@ -66,6 +66,17 @@ class UltimateApp:
         self.loaded_waypoints: List[WaypointItem] = []
         self.is_running = False
 
+        # Console log buffering for high UI responsiveness
+        self._log_buffer: List[str] = []
+        self._log_lock = threading.Lock()
+        self._log_flush_pending = False
+
+        # Drag-and-drop state
+        self._drag_acc_idx: Optional[int] = None
+        self._acc_rows: List[tuple] = []
+        self._drag_tmpl_idx: Optional[int] = None
+        self._tmpl_rows: List[tuple] = []
+
         self._init_ui()
         self._set_app_icon()
         self._init_client_session()
@@ -73,15 +84,27 @@ class UltimateApp:
 
     def _set_app_icon(self):
         """Set window icon and macOS Dock icon if assets exist."""
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        png_path = os.path.join(base_dir, "assets", "icon.png")
-        ico_path = os.path.join(base_dir, "assets", "icon.ico")
+        bundle_dir = get_bundle_dir()
+        base_dir = get_base_dir()
+
+        png_path = ""
+        ico_path = ""
+        icns_path = ""
+
+        for d in [bundle_dir, base_dir]:
+            p = os.path.join(d, "assets", "icon.png")
+            i = os.path.join(d, "assets", "icon.ico")
+            c = os.path.join(d, "assets", "icon.icns")
+            if os.path.exists(p) or os.path.exists(i) or os.path.exists(c):
+                png_path = p
+                ico_path = i
+                icns_path = c
+                break
 
         # 1. macOS Dock icon via AppKit / Cocoa (prefers native multi-res .icns)
         if sys.platform == "darwin":
-            icns_path = os.path.join(base_dir, "assets", "icon.icns")
-            icon_file = icns_path if os.path.exists(icns_path) else png_path
-            if os.path.exists(icon_file):
+            icon_file = icns_path if (icns_path and os.path.exists(icns_path)) else png_path
+            if icon_file and os.path.exists(icon_file):
                 try:
                     from AppKit import NSApplication, NSImage
                     app = NSApplication.sharedApplication()
@@ -92,12 +115,12 @@ class UltimateApp:
                     pass
 
         # 2. Window titlebar & taskbar icon (Windows / Linux)
-        if os.path.exists(ico_path) and sys.platform == "win32":
+        if ico_path and os.path.exists(ico_path) and sys.platform == "win32":
             try:
                 self.root.iconbitmap(ico_path)
             except Exception:
                 pass
-        elif os.path.exists(png_path):
+        elif png_path and os.path.exists(png_path):
             try:
                 from PIL import Image, ImageTk
                 im = Image.open(png_path).resize((64, 64))
@@ -816,18 +839,63 @@ class UltimateApp:
         for widget in self.acc_display_frame.winfo_children():
             widget.destroy()
 
+        self._acc_rows = []
+
         if not self.config.accounts:
             ctk.CTkLabel(self.acc_display_frame, text="No accounts registered. Add one below.", text_color=theme.TEXT_MUTED).pack(anchor="w", pady=4)
             return
 
-        for acc in self.config.accounts:
-            row = ctk.CTkFrame(self.acc_display_frame, fg_color=theme.CARD_BG)
+        total = len(self.config.accounts)
+        for idx, acc in enumerate(self.config.accounts):
+            row = ctk.CTkFrame(self.acc_display_frame, fg_color=theme.CARD_BG, corner_radius=6, border_width=1, border_color=theme.CARD_BORDER)
             row.pack(fill="x", pady=2)
+            self._acc_rows.append((row, idx))
+
+            # Drag handle
+            drag_handle = ctk.CTkLabel(row, text=" ☰ ", font=ctk.CTkFont(size=14, weight="bold"), text_color=theme.TEXT_MUTED, cursor="fleur")
+            drag_handle.pack(side="left", padx=(8, 2))
+
+            # Up / Down Steppers
+            btn_up = ctk.CTkButton(
+                row,
+                text="▲",
+                width=24,
+                height=22,
+                font=ctk.CTkFont(size=10),
+                fg_color=theme.BG_TERTIARY if idx > 0 else theme.CARD_BG,
+                hover_color=theme.ACCENT_BLUE if idx > 0 else theme.CARD_BG,
+                text_color=theme.TEXT_PRIMARY if idx > 0 else theme.TEXT_MUTED,
+                state="normal" if idx > 0 else "disabled",
+                command=lambda i=idx: self._on_move_account(i, -1)
+            )
+            btn_up.pack(side="left", padx=1)
+
+            btn_down = ctk.CTkButton(
+                row,
+                text="▼",
+                width=24,
+                height=22,
+                font=ctk.CTkFont(size=10),
+                fg_color=theme.BG_TERTIARY if idx < total - 1 else theme.CARD_BG,
+                hover_color=theme.ACCENT_BLUE if idx < total - 1 else theme.CARD_BG,
+                text_color=theme.TEXT_PRIMARY if idx < total - 1 else theme.TEXT_MUTED,
+                state="normal" if idx < total - 1 else "disabled",
+                command=lambda i=idx: self._on_move_account(i, 1)
+            )
+            btn_down.pack(side="left", padx=(1, 6))
 
             def_tag = " (DEFAULT)" if acc.is_default else ""
             pwd_tag = "" if acc.password else " [Copy only / no pwd]"
             lbl = ctk.CTkLabel(row, text=f"#{acc.id}: {acc.username}{pwd_tag}{def_tag}", font=ctk.CTkFont(weight="bold"))
-            lbl.pack(side="left", padx=10, pady=6)
+            lbl.pack(side="left", padx=6, pady=6)
+
+            # Bind drag & drop
+            drag_handle.bind("<Button-1>", lambda e, i=idx: self._on_acc_drag_start(e, i))
+            drag_handle.bind("<B1-Motion>", self._on_acc_drag_motion)
+            drag_handle.bind("<ButtonRelease-1>", self._on_acc_drag_release)
+            lbl.bind("<Button-1>", lambda e, i=idx: self._on_acc_drag_start(e, i))
+            lbl.bind("<B1-Motion>", self._on_acc_drag_motion)
+            lbl.bind("<ButtonRelease-1>", self._on_acc_drag_release)
 
             del_btn = ctk.CTkButton(
                 row,
@@ -860,6 +928,68 @@ class UltimateApp:
                     command=lambda a_id=acc.id: self._on_set_default_account(a_id)
                 )
                 set_def_btn.pack(side="right", padx=4)
+
+    def _on_acc_drag_start(self, event, idx: int):
+        self._drag_acc_idx = idx
+        if 0 <= idx < len(self._acc_rows):
+            row_frame, _ = self._acc_rows[idx]
+            row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+
+    def _on_acc_drag_motion(self, event):
+        if self._drag_acc_idx is None:
+            return
+        target_idx = self._find_acc_drop_target(event.y_root)
+        for row_frame, i in self._acc_rows:
+            if i == self._drag_acc_idx:
+                row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+            elif i == target_idx:
+                row_frame.configure(border_color=theme.ACCENT_GREEN, border_width=2)
+            else:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+
+    def _find_acc_drop_target(self, y_root: int) -> Optional[int]:
+        for row_frame, idx in self._acc_rows:
+            try:
+                ry = row_frame.winfo_rooty()
+                rh = row_frame.winfo_height()
+                if ry <= y_root <= ry + rh:
+                    return idx
+            except Exception:
+                pass
+        return None
+
+    def _on_acc_drag_release(self, event):
+        if self._drag_acc_idx is None:
+            return
+        src_idx = self._drag_acc_idx
+        self._drag_acc_idx = None
+        target_idx = self._find_acc_drop_target(event.y_root)
+
+        for row_frame, _ in self._acc_rows:
+            try:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+            except Exception:
+                pass
+
+        if target_idx is not None and target_idx != src_idx and 0 <= target_idx < len(self.config.accounts):
+            acc = self.config.accounts.pop(src_idx)
+            self.config.accounts.insert(target_idx, acc)
+            self.config_mgr.renumber_accounts()
+            self._refresh_accounts_view()
+            self._refresh_header_combo()
+            self._refresh_copy_account_combo()
+            self.log(f"Moved account '{acc.username}' to position #{target_idx + 1}.", "info")
+
+    def _on_move_account(self, idx: int, delta: int):
+        new_idx = idx + delta
+        if 0 <= new_idx < len(self.config.accounts):
+            acc = self.config.accounts.pop(idx)
+            self.config.accounts.insert(new_idx, acc)
+            self.config_mgr.renumber_accounts()
+            self._refresh_accounts_view()
+            self._refresh_header_combo()
+            self._refresh_copy_account_combo()
+            self.log(f"Moved account '{acc.username}' to position #{new_idx + 1}.", "info")
 
     def _center_toplevel(self, toplevel, width: int, height: int):
         self.root.update_idletasks()
@@ -972,16 +1102,35 @@ class UltimateApp:
     # --------------------------------------------------------------------------
 
     def log(self, message: str, level: str = "info"):
-        """Thread-safe logging into console with timestamps."""
-        def append():
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            line = f"[{timestamp}] {message}\n"
-            self.txt_console.insert("end", line)
-            self.txt_console.see("end")
+        """Thread-safe batched logging into console with timestamps."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{timestamp}] {message}\n"
+        with self._log_lock:
+            self._log_buffer.append(line)
+            if not self._log_flush_pending:
+                self._log_flush_pending = True
+                self.root.after(35, self._flush_log_buffer)
 
-        self.root.after(0, append)
+    def _flush_log_buffer(self):
+        with self._log_lock:
+            lines = self._log_buffer[:]
+            self._log_buffer.clear()
+            self._log_flush_pending = False
+        if not lines:
+            return
+        chunk = "".join(lines)
+        try:
+            self.txt_console.insert("end", chunk)
+            line_count = int(self.txt_console.index('end-1c').split('.')[0])
+            if line_count > 2500:
+                self.txt_console.delete("1.0", f"{line_count - 2000}.0")
+            self.txt_console.see("end")
+        except Exception:
+            pass
 
     def _clear_console(self):
+        with self._log_lock:
+            self._log_buffer.clear()
         self.txt_console.delete("1.0", "end")
 
     def _export_console(self):
@@ -1611,20 +1760,65 @@ class UltimateApp:
         for widget in self.tmpl_display_frame.winfo_children():
             widget.destroy()
 
+        self._tmpl_rows = []
+
         if not self.config.log_templates:
             ctk.CTkLabel(self.tmpl_display_frame, text="No templates configured. Add one below.", text_color=theme.TEXT_MUTED).pack(anchor="w", pady=4)
             return
 
-        for idx, tmpl in enumerate(self.config.log_templates, 1):
-            row = ctk.CTkFrame(self.tmpl_display_frame, fg_color=theme.CARD_BG)
+        total = len(self.config.log_templates)
+        for idx, tmpl in enumerate(self.config.log_templates):
+            row = ctk.CTkFrame(self.tmpl_display_frame, fg_color=theme.CARD_BG, corner_radius=6, border_width=1, border_color=theme.CARD_BORDER)
             row.pack(fill="x", pady=2)
+            self._tmpl_rows.append((row, idx))
+
+            # Drag handle
+            drag_handle = ctk.CTkLabel(row, text=" ☰ ", font=ctk.CTkFont(size=14, weight="bold"), text_color=theme.TEXT_MUTED, cursor="fleur")
+            drag_handle.pack(side="left", padx=(8, 2))
+
+            # Up / Down Steppers
+            btn_up = ctk.CTkButton(
+                row,
+                text="▲",
+                width=24,
+                height=22,
+                font=ctk.CTkFont(size=10),
+                fg_color=theme.BG_TERTIARY if idx > 0 else theme.CARD_BG,
+                hover_color=theme.ACCENT_BLUE if idx > 0 else theme.CARD_BG,
+                text_color=theme.TEXT_PRIMARY if idx > 0 else theme.TEXT_MUTED,
+                state="normal" if idx > 0 else "disabled",
+                command=lambda i=idx: self._on_move_template(i, -1)
+            )
+            btn_up.pack(side="left", padx=1)
+
+            btn_down = ctk.CTkButton(
+                row,
+                text="▼",
+                width=24,
+                height=22,
+                font=ctk.CTkFont(size=10),
+                fg_color=theme.BG_TERTIARY if idx < total - 1 else theme.CARD_BG,
+                hover_color=theme.ACCENT_BLUE if idx < total - 1 else theme.CARD_BG,
+                text_color=theme.TEXT_PRIMARY if idx < total - 1 else theme.TEXT_MUTED,
+                state="normal" if idx < total - 1 else "disabled",
+                command=lambda i=idx: self._on_move_template(i, 1)
+            )
+            btn_down.pack(side="left", padx=(1, 6))
 
             display_snip = tmpl.replace("\n", " ").strip()
-            if len(display_snip) > 65:
-                display_snip = display_snip[:62] + "..."
+            if len(display_snip) > 55:
+                display_snip = display_snip[:52] + "..."
 
-            lbl = ctk.CTkLabel(row, text=f"#{idx}: {display_snip}", font=ctk.CTkFont(weight="bold"))
-            lbl.pack(side="left", padx=10, pady=6)
+            lbl = ctk.CTkLabel(row, text=f"#{idx + 1}: {display_snip}", font=ctk.CTkFont(weight="bold"))
+            lbl.pack(side="left", padx=6, pady=6)
+
+            # Bind drag & drop
+            drag_handle.bind("<Button-1>", lambda e, i=idx: self._on_tmpl_drag_start(e, i))
+            drag_handle.bind("<B1-Motion>", self._on_tmpl_drag_motion)
+            drag_handle.bind("<ButtonRelease-1>", self._on_tmpl_drag_release)
+            lbl.bind("<Button-1>", lambda e, i=idx: self._on_tmpl_drag_start(e, i))
+            lbl.bind("<B1-Motion>", self._on_tmpl_drag_motion)
+            lbl.bind("<ButtonRelease-1>", self._on_tmpl_drag_release)
 
             del_btn = ctk.CTkButton(
                 row,
@@ -1633,7 +1827,7 @@ class UltimateApp:
                 height=26,
                 fg_color=theme.ACCENT_RED,
                 hover_color=theme.ACCENT_RED_HOVER,
-                command=lambda t_idx=idx-1: self._on_delete_template(t_idx)
+                command=lambda t_idx=idx: self._on_delete_template(t_idx)
             )
             del_btn.pack(side="right", padx=4)
 
@@ -1644,9 +1838,77 @@ class UltimateApp:
                 height=26,
                 fg_color=theme.ACCENT_BLUE,
                 hover_color=theme.ACCENT_BLUE_HOVER,
-                command=lambda t_idx=idx-1: self._on_edit_template(t_idx)
+                command=lambda t_idx=idx: self._on_edit_template(t_idx)
             )
             edit_btn.pack(side="right", padx=4)
+
+    def _on_tmpl_drag_start(self, event, idx: int):
+        self._drag_tmpl_idx = idx
+        if 0 <= idx < len(self._tmpl_rows):
+            row_frame, _ = self._tmpl_rows[idx]
+            row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+
+    def _on_tmpl_drag_motion(self, event):
+        if self._drag_tmpl_idx is None:
+            return
+        target_idx = self._find_tmpl_drop_target(event.y_root)
+        for row_frame, i in self._tmpl_rows:
+            if i == self._drag_tmpl_idx:
+                row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+            elif i == target_idx:
+                row_frame.configure(border_color=theme.ACCENT_GREEN, border_width=2)
+            else:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+
+    def _find_tmpl_drop_target(self, y_root: int) -> Optional[int]:
+        for row_frame, idx in self._tmpl_rows:
+            try:
+                ry = row_frame.winfo_rooty()
+                rh = row_frame.winfo_height()
+                if ry <= y_root <= ry + rh:
+                    return idx
+            except Exception:
+                pass
+        return None
+
+    def _on_tmpl_drag_release(self, event):
+        if self._drag_tmpl_idx is None:
+            return
+        src_idx = self._drag_tmpl_idx
+        self._drag_tmpl_idx = None
+        target_idx = self._find_tmpl_drop_target(event.y_root)
+
+        for row_frame, _ in self._tmpl_rows:
+            try:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+            except Exception:
+                pass
+
+        if target_idx is not None and target_idx != src_idx and 0 <= target_idx < len(self.config.log_templates):
+            tmpl = self.config.log_templates.pop(src_idx)
+            self.config.log_templates.insert(target_idx, tmpl)
+            self.config_mgr.save()
+            self._refresh_templates_view()
+            self._update_combo_template_values()
+            self.log(f"Moved template to position #{target_idx + 1}.", "info")
+
+    def _on_move_template(self, idx: int, delta: int):
+        new_idx = idx + delta
+        if 0 <= new_idx < len(self.config.log_templates):
+            tmpl = self.config.log_templates.pop(idx)
+            self.config.log_templates.insert(new_idx, tmpl)
+            self.config_mgr.save()
+            self._refresh_templates_view()
+            self._update_combo_template_values()
+            self.log(f"Moved template to position #{new_idx + 1}.", "info")
+
+    def _update_combo_template_values(self):
+        if hasattr(self, "combo_template"):
+            mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
+            if mode == "EDIT":
+                self.combo_template.configure(values=["[Ponechat původní]"] + self.config.log_templates)
+            else:
+                self.combo_template.configure(values=self.config.log_templates)
 
     def _on_edit_template(self, index: int):
         if not (0 <= index < len(self.config.log_templates)):
@@ -1680,12 +1942,7 @@ class UltimateApp:
             self.config.log_templates[index] = new_text
             self.config_mgr.save()
             self._refresh_templates_view()
-            if hasattr(self, "combo_template"):
-                mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
-                if mode == "EDIT":
-                    self.combo_template.configure(values=["[Ponechat původní]"] + self.config.log_templates)
-                else:
-                    self.combo_template.configure(values=self.config.log_templates)
+            self._update_combo_template_values()
             self.log(f"Updated template #{index + 1}.", "success")
             dialog.destroy()
 
@@ -1704,7 +1961,7 @@ class UltimateApp:
         self.config_mgr.save()
         self.new_tmpl_entry.delete(0, "end")
         self._refresh_templates_view()
-        self.combo_template.configure(values=self.config.log_templates)
+        self._update_combo_template_values()
         self.log(f"Added log template #{len(self.config.log_templates)}.", "success")
 
     def _on_delete_template(self, index: int):
@@ -1717,7 +1974,7 @@ class UltimateApp:
                     self.config.log_templates = ["TFTC."]
                 self.config_mgr.save()
                 self._refresh_templates_view()
-                self.combo_template.configure(values=self.config.log_templates)
+                self._update_combo_template_values()
                 self.log(f"Removed template #{index + 1}.", "info")
 
     def _on_toggle_omit_virtual_earth(self):

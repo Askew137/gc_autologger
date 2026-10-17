@@ -9,6 +9,7 @@ import json
 import time
 from dataclasses import dataclass, asdict, field
 from typing import Optional, List, Dict, Any
+from core.config import get_base_dir
 
 
 @dataclass
@@ -29,7 +30,7 @@ class RunCheckpointManager:
 
     def __init__(self, runs_dir: Optional[str] = None):
         if not runs_dir:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = get_base_dir()
             runs_dir = os.path.join(base_dir, "runs")
         self.runs_dir = runs_dir
         os.makedirs(self.runs_dir, exist_ok=True)

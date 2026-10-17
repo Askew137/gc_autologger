@@ -5,10 +5,33 @@ Provides full backwards compatibility with legacy InputData.json.
 """
 
 import os
+import sys
 import json
 import shutil
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Any
+
+
+def get_base_dir() -> str:
+    """
+    Get the persistent directory for storing user data (config.json, session_cookies.json, runs/).
+    When packaged as a PyInstaller executable, returns the folder containing the .exe binary.
+    When running in development, returns the repository root directory.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_bundle_dir() -> str:
+    """
+    Get the directory containing bundled read-only assets (assets/, config.example.json).
+    When packaged with PyInstaller --onefile, resources are unpacked into sys._MEIPASS.
+    When running in development, returns the repository root directory.
+    """
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @dataclass
@@ -58,10 +81,11 @@ class ConfigManager:
 
     def __init__(self, config_dir: Optional[str] = None):
         if not config_dir:
-            config_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_dir = get_base_dir()
         self.config_dir = config_dir
         self.config_file = os.path.join(self.config_dir, "config.json")
-        self.example_file = os.path.join(self.config_dir, "config.example.json")
+        bundle_example = os.path.join(get_bundle_dir(), "config.example.json")
+        self.example_file = bundle_example if os.path.exists(bundle_example) else os.path.join(self.config_dir, "config.example.json")
         self.config: AppConfig = AppConfig()
         self.load()
 
@@ -133,11 +157,16 @@ class ConfigManager:
                 return acc
         return None
 
+    def renumber_accounts(self):
+        """Renumber all accounts sequentially from 1 to N and save."""
+        for idx, acc in enumerate(self.config.accounts, 1):
+            acc.id = str(idx)
+        self.save()
+
     def add_or_update_account(self, username: str, password: str = "", is_default: bool = False, acc_id: Optional[str] = None) -> AccountConfig:
         if not acc_id:
             # Generate next numeric ID
-            existing_ids = [int(a.id) for a in self.config.accounts if a.id.isdigit()]
-            acc_id = str(max(existing_ids, default=0) + 1)
+            acc_id = str(len(self.config.accounts) + 1)
 
         if is_default:
             for a in self.config.accounts:
@@ -145,14 +174,14 @@ class ConfigManager:
 
         # Check if updating existing
         for idx, a in enumerate(self.config.accounts):
-            if a.id == acc_id:
-                self.config.accounts[idx] = AccountConfig(id=acc_id, username=username, password=password, is_default=is_default)
-                self.save()
+            if a.id == acc_id or a.username.lower() == username.lower():
+                self.config.accounts[idx] = AccountConfig(id=a.id, username=username, password=password, is_default=is_default)
+                self.renumber_accounts()
                 return self.config.accounts[idx]
 
         new_acc = AccountConfig(id=acc_id, username=username, password=password, is_default=is_default)
         self.config.accounts.append(new_acc)
-        self.save()
+        self.renumber_accounts()
         return new_acc
 
     def remove_account(self, acc_id: str) -> bool:
@@ -161,7 +190,7 @@ class ConfigManager:
         if len(self.config.accounts) < initial_len:
             if self.config.accounts and not any(a.is_default for a in self.config.accounts):
                 self.config.accounts[0].is_default = True
-            self.save()
+            self.renumber_accounts()
             return True
         return False
 
