@@ -75,10 +75,12 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
         name_elem = wpt.find("name")
         desc_elem = wpt.find("desc")
         type_elem = wpt.find("type")
+        sym_elem = wpt.find("sym")
 
         name = name_elem.text.strip() if name_elem is not None and name_elem.text else ""
         desc = desc_elem.text.strip() if desc_elem is not None and desc_elem.text else ""
         wpt_type = type_elem.text.strip() if type_elem is not None and type_elem.text else ""
+        sym = sym_elem.text.strip() if sym_elem is not None and sym_elem.text else ""
 
         # Extract best cache title: Groundspeak cache name -> urlname -> desc -> name
         cache_name = ""
@@ -125,33 +127,54 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
                         source_file=base_filename
                     )
 
-        # 2. Child waypoint of type Final (FN..., FZ... or Final Location)
-        elif upper_name.startswith("FN") or upper_name.startswith("FZ") or "FINAL" in wpt_type.upper():
-            derived_gc = None
-            match = re.match(r"^(?:FN|FZ)([A-Z0-9]+)", upper_name)
-            if match:
-                derived_gc = "GC" + match.group(1)
-            else:
-                # Check <url> or <cmt> for parent GC code (e.g. Geoget format)
+        # 2. Child waypoint of type Final (FN..., FZ..., FH..., FJ..., or Final Location)
+        else:
+            is_final_child = (
+                upper_name.startswith("FN")
+                or upper_name.startswith("FZ")
+                or "FINAL" in wpt_type.upper()
+                or "FINAL" in sym.upper()
+                or desc.strip().upper().startswith("FINAL")
+            )
+            # Ignore dummy 0.0, 0.0 coordinates that Groundspeak includes for hidden finals
+            if is_final_child and lat is not None and lon is not None and (abs(lat) > 1e-6 or abs(lon) > 1e-6):
+                derived_gc = None
+
+                # Method A: Check URL for GC code
                 url_elem = wpt.find("url")
                 if url_elem is not None and url_elem.text:
                     m_url = re.search(r"(GC[A-Z0-9]+)", url_elem.text.upper())
                     if m_url:
                         derived_gc = m_url.group(1)
 
-            if derived_gc and lat is not None and lon is not None:
-                meta = gc_metadata.get(derived_gc, {})
-                title = meta.get("name") or cache_name
-                ctype = meta.get("cache_type") or "Final Location"
-                child_finals[derived_gc] = WaypointItem(
-                    gccode=derived_gc,
-                    lat=lat,
-                    lon=lon,
-                    name=title,
-                    cache_type=ctype,
-                    is_modified_hint=True,
-                    source_file=base_filename
-                )
+                # Method B: Check cmt or desc for GC code
+                if not derived_gc:
+                    cmt_elem = wpt.find("cmt")
+                    if cmt_elem is not None and cmt_elem.text:
+                        m_cmt = re.search(r"(GC[A-Z0-9]+)", cmt_elem.text.upper())
+                        if m_cmt:
+                            derived_gc = m_cmt.group(1)
+
+                # Method C: Groundspeak / GeoGet / GSAK 2-letter prefix convention
+                # Replace 2-char waypoint prefix with 'GC' (e.g. FN12345 -> GC12345, FH6G483 -> GC6G483)
+                if not derived_gc and len(upper_name) >= 3:
+                    cand = "GC" + upper_name[2:]
+                    if re.match(r"^GC[A-Z0-9]{1,7}$", cand):
+                        derived_gc = cand
+
+                if derived_gc:
+                    meta = gc_metadata.get(derived_gc, {})
+                    title = meta.get("name") or cache_name
+                    ctype = meta.get("cache_type") or "Final Location"
+                    child_finals[derived_gc] = WaypointItem(
+                        gccode=derived_gc,
+                        lat=lat,
+                        lon=lon,
+                        name=title,
+                        cache_type=ctype,
+                        is_modified_hint=True,
+                        source_file=base_filename
+                    )
 
     # If a final child waypoint exists, prefer its coordinates and flag as modified
     for gc_code, final_item in child_finals.items():
