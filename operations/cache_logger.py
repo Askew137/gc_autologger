@@ -428,3 +428,78 @@ class CacheLogger:
             "failed_items": failed_items,
             "elapsed_seconds": total_elapsed
         }
+
+    def run_unignore(
+        self,
+        gc_codes: List[str],
+        on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
+        on_log: Optional[Callable[[str, str], None]] = None
+    ) -> Dict[str, Any]:
+        """Remove multiple caches from the Ignore list (un-ignore)."""
+        self.safety.reset()
+        total = len(gc_codes)
+        success_count = 0
+        failed_count = 0
+        failed_items: List[Dict[str, str]] = []
+
+        def log(msg: str, level: str = "info"):
+            if on_log:
+                on_log(msg, level)
+            else:
+                print(f"[{level.upper()}] {msg}")
+
+        log(f"Starting Ignore list removal (un-ignore) for {total} caches...", "info")
+
+        if not self.client.ensure_valid_session():
+            log("Session is invalid. Please log in first.", "error")
+            return {"total": total, "success": 0, "failed": total, "failed_items": []}
+
+        log("Fetching current Ignore list from your account...", "info")
+        ignored_set = self.client.get_ignored_cache_codes()
+        log(f"Found {len(ignored_set)} cache(s) currently on your Ignore list.", "info")
+
+        start_time = time.time()
+        for idx, gc_code in enumerate(gc_codes, 1):
+            if self.safety.is_cancelled:
+                log(f"Cancelled by user at item {idx}/{total}.", "warning")
+                break
+
+            prefix = f"[{idx}/{total}] {gc_code}"
+            clean_code = gc_code.strip().upper()
+
+            # Fast check: if not in ignored_set, it's already un-ignored (0 network calls)
+            if clean_code not in ignored_set:
+                success_count += 1
+                log(f"{prefix} ⏩ Not on Ignore list (already un-ignored)", "info")
+                percent = (idx / total) * 100
+                if on_progress:
+                    on_progress(idx, total, percent, None, gc_code)
+                continue
+
+            success, message = self.client.unignore_cache(clean_code)
+
+            if success:
+                success_count += 1
+                ignored_set.discard(clean_code)
+                log(f"{prefix} ✅ {message}", "success")
+            else:
+                failed_count += 1
+                failed_items.append({"gccode": gc_code, "reason": message})
+                log(f"{prefix} ⚠️ {message}", "warning")
+
+            percent = (idx / total) * 100
+            if on_progress:
+                on_progress(idx, total, percent, None, gc_code)
+
+            if idx < total:
+                if not self.safety.wait_before_next(idx, total):
+                    break
+
+        total_elapsed = time.time() - start_time
+        return {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "failed_items": failed_items,
+            "elapsed_seconds": total_elapsed
+        }

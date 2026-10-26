@@ -66,6 +66,7 @@ class GuiConfig:
 class AppConfig:
     accounts: List[AccountConfig] = field(default_factory=list)
     folder_path: str = ""
+    last_browse_dir: str = ""
     log_templates: List[str] = field(default_factory=lambda: [
         "TFTC.",
         "DFDC.",
@@ -121,6 +122,7 @@ class ConfigManager:
             raw_dict = {
                 "accounts": [asdict(a) for a in self.config.accounts],
                 "folder_path": self.config.folder_path,
+                "last_browse_dir": self.config.last_browse_dir,
                 "log_templates": self.config.log_templates,
                 "safety": asdict(self.config.safety),
                 "filters": asdict(self.config.filters),
@@ -233,6 +235,7 @@ class ConfigManager:
         return AppConfig(
             accounts=accounts,
             folder_path=str(data.get("folder_path", "")),
+            last_browse_dir=str(data.get("last_browse_dir", data.get("folder_path", ""))),
             log_templates=list(data.get("log_templates", [])),
             safety=safety,
             filters=filters,

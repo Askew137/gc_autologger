@@ -64,6 +64,8 @@ class UltimateApp:
         self.checkpoint_mgr = RunCheckpointManager()
 
         self.loaded_waypoints: List[WaypointItem] = []
+        self.selected_coords_files: List[str] = []
+        self.selected_ignore_files: List[str] = []
         self.is_running = False
 
         # Console log buffering for high UI responsiveness
@@ -255,13 +257,12 @@ class UltimateApp:
 
         ctk.CTkLabel(file_frame, text="GPX / LOC source:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
 
-        self.coords_path_entry = ctk.CTkEntry(file_frame, placeholder_text="Select GPX/LOC file or folder...")
+        self.coords_path_entry = ctk.CTkEntry(file_frame, placeholder_text="Select GPX/LOC file(s)...")
         self.coords_path_entry.pack(side="left", fill="x", expand=True, padx=8)
-        if self.config.folder_path:
-            self.coords_path_entry.insert(0, self.config.folder_path)
+        if getattr(self.config, "last_browse_dir", None):
+            pass
 
-        ctk.CTkButton(file_frame, text="Browse file", width=95, command=self._browse_coords_file).pack(side="left", padx=4)
-        ctk.CTkButton(file_frame, text="Browse folder", width=105, command=self._browse_coords_folder).pack(side="left", padx=4)
+        ctk.CTkButton(file_frame, text="Browse file(s)", width=110, command=self._browse_coords_file).pack(side="left", padx=4)
         ctk.CTkButton(file_frame, text="Load items", width=90, fg_color=theme.ACCENT_BLUE, command=self._load_coords_items).pack(side="left", padx=4)
 
         # Resume banner frame (shown if an unfinished run is detected)
@@ -665,22 +666,21 @@ class UltimateApp:
         box = ctk.CTkFrame(self.tab_ignore)
         box.pack(fill="both", expand=True, padx=14, pady=14)
 
-        ctk.CTkLabel(box, text="Bulk add caches to ignore list", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=14, pady=(12, 6))
+        ctk.CTkLabel(box, text="Ignore list management (Add / Remove caches)", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=14, pady=(12, 6))
 
-        # File & Folder Import row
+        # File Import row
         file_frame = ctk.CTkFrame(box, fg_color="transparent")
         file_frame.pack(fill="x", padx=14, pady=6)
 
         ctk.CTkLabel(file_frame, text="Import from GPX/LOC:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
-        self.ignore_path_entry = ctk.CTkEntry(file_frame, placeholder_text="Select GPX/LOC file or folder...")
+        self.ignore_path_entry = ctk.CTkEntry(file_frame, placeholder_text="Select GPX/LOC file(s)...")
         self.ignore_path_entry.pack(side="left", fill="x", expand=True, padx=8)
 
-        ctk.CTkButton(file_frame, text="Browse file", width=95, command=self._browse_ignore_file).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="Browse folder", width=105, command=self._browse_ignore_folder).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="Browse file(s)", width=110, command=self._browse_ignore_file).pack(side="left", padx=3)
         ctk.CTkButton(file_frame, text="Import to list", width=100, fg_color=theme.ACCENT_BLUE, command=self._import_ignore_file).pack(side="left", padx=3)
 
         # Text input & review
-        ctk.CTkLabel(box, text="GC codes to ignore (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
+        ctk.CTkLabel(box, text="GC codes to process (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
 
         self.txt_ignore_codes = ctk.CTkTextbox(box, height=160, wrap="word")
         self.txt_ignore_codes.pack(fill="both", expand=True, padx=14, pady=4)
@@ -690,11 +690,22 @@ class UltimateApp:
 
         ctk.CTkButton(
             btn_row,
-            text="🚫 Add caches to ignore list",
+            text="🚫 Add to ignore list",
             font=ctk.CTkFont(weight="bold"),
             fg_color=theme.ACCENT_RED,
+            hover_color=theme.ACCENT_RED_HOVER,
             height=36,
             command=self._start_bulk_ignore
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_row,
+            text="✅ Remove from ignore list (Unignore)",
+            font=ctk.CTkFont(weight="bold"),
+            fg_color=theme.ACCENT_GREEN,
+            hover_color=theme.ACCENT_GREEN_HOVER,
+            height=36,
+            command=self._start_bulk_unignore
         ).pack(side="left", padx=4)
 
         ctk.CTkButton(
@@ -1242,29 +1253,71 @@ class UltimateApp:
     # --------------------------------------------------------------------------
 
     def _browse_coords_file(self):
-        f = filedialog.askopenfilename(filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("All files", "*.*")])
-        if f:
-            self.coords_path_entry.delete(0, "end")
-            self.coords_path_entry.insert(0, f)
-            self._load_coords_items()
+        initial_dir = getattr(self.config, "last_browse_dir", "") or getattr(self.config, "folder_path", "") or os.path.expanduser("~")
+        if not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser("~")
 
-    def _browse_coords_folder(self):
-        d = filedialog.askdirectory()
-        if d:
+        files = filedialog.askopenfilenames(
+            title="Select GPX / LOC file(s)",
+            filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("All files", "*.*")],
+            initialdir=initial_dir
+        )
+        if files:
+            chosen_dir = os.path.dirname(files[0])
+            self.config.last_browse_dir = chosen_dir
+            self.config.folder_path = chosen_dir
+            self.config_mgr.save()
+
+            self.selected_coords_files = list(files)
             self.coords_path_entry.delete(0, "end")
-            self.coords_path_entry.insert(0, d)
+            if len(files) == 1:
+                self.coords_path_entry.insert(0, files[0])
+            else:
+                summary = f"[{len(files)} files selected] {', '.join(os.path.basename(f) for f in files[:2])}{'...' if len(files) > 2 else ''}"
+                self.coords_path_entry.insert(0, summary)
+
             self._load_coords_items()
 
     def _load_coords_from_path(self, path: str):
         if not path:
             return
-        if os.path.isfile(path):
-            self.loaded_waypoints = parse_file(path)
-        elif os.path.isdir(path):
-            self.loaded_waypoints = parse_folder(path)
-        else:
-            self.lbl_coords_summary.configure(text=f"Path not found: {path}", text_color=theme.ACCENT_RED)
+        self.selected_coords_files = [path]
+        self._load_coords_items()
+
+    def _load_coords_items(self):
+        files_to_load = getattr(self, "selected_coords_files", [])
+        raw = self.coords_path_entry.get().strip()
+
+        # If user manually typed/pasted a path into entry
+        if not files_to_load or (raw and not raw.startswith("[") and (not files_to_load or raw != files_to_load[0])):
+            if ";" in raw:
+                files_to_load = [f.strip() for f in raw.split(";") if f.strip() and os.path.exists(f.strip())]
+            elif raw and os.path.exists(raw):
+                files_to_load = [raw]
+
+        if not files_to_load:
+            self.lbl_coords_summary.configure(text="No files selected or path not found.", text_color=theme.ACCENT_RED)
             return
+
+        all_waypoints_map = {}
+        loaded_sources = []
+        for f_path in files_to_load:
+            if not os.path.exists(f_path):
+                continue
+            loaded_sources.append(os.path.basename(f_path))
+            if os.path.isfile(f_path):
+                file_items = parse_file(f_path)
+            elif os.path.isdir(f_path):
+                file_items = parse_folder(f_path)
+            else:
+                continue
+
+            for it in file_items:
+                # If cache already present, prefer the one with modified coordinates hint
+                if it.gccode not in all_waypoints_map or it.is_modified_hint:
+                    all_waypoints_map[it.gccode] = it
+
+        self.loaded_waypoints = list(all_waypoints_map.values())
 
         if self.config.filters.omit_virtual_earth_webcam:
             orig_count = len(self.loaded_waypoints)
@@ -1276,15 +1329,12 @@ class UltimateApp:
 
         count = len(self.loaded_waypoints)
         modified_hints = sum(1 for w in self.loaded_waypoints if w.is_modified_hint)
+        src_label = loaded_sources[0] if len(loaded_sources) == 1 else f"{len(loaded_sources)} files"
         self.lbl_coords_summary.configure(
-            text=f"Loaded {count} caches ({modified_hints} flagged with modified coords in GPX){filter_msg}.",
+            text=f"Loaded {count} caches ({modified_hints} with modified coords in GPX){filter_msg}.",
             text_color=theme.ACCENT_GREEN if count > 0 else theme.TEXT_MUTED
         )
-        self.log(f"Loaded {count} waypoints from '{os.path.basename(path)}'{filter_msg}.", "info")
-
-    def _load_coords_items(self):
-        path = self.coords_path_entry.get().strip()
-        self._load_coords_from_path(path)
+        self.log(f"Loaded {count} waypoints from {src_label}{filter_msg}.", "info")
 
     def _check_active_checkpoint(self):
         if not hasattr(self, "frame_resume_coords"):
@@ -1619,41 +1669,66 @@ class UltimateApp:
             self.entry_copy_pwd.delete(0, "end")
 
     def _browse_ignore_file(self):
-        f = filedialog.askopenfilename(filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("All files", "*.*")])
-        if f:
-            self.ignore_path_entry.delete(0, "end")
-            self.ignore_path_entry.insert(0, f)
-            self._import_ignore_file()
+        initial_dir = getattr(self.config, "last_browse_dir", "") or getattr(self.config, "folder_path", "") or os.path.expanduser("~")
+        if not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser("~")
 
-    def _browse_ignore_folder(self):
-        d = filedialog.askdirectory()
-        if d:
+        files = filedialog.askopenfilenames(
+            title="Select GPX / LOC file(s) to import",
+            filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("All files", "*.*")],
+            initialdir=initial_dir
+        )
+        if files:
+            chosen_dir = os.path.dirname(files[0])
+            self.config.last_browse_dir = chosen_dir
+            self.config.folder_path = chosen_dir
+            self.config_mgr.save()
+
+            self.selected_ignore_files = list(files)
             self.ignore_path_entry.delete(0, "end")
-            self.ignore_path_entry.insert(0, d)
+            if len(files) == 1:
+                self.ignore_path_entry.insert(0, files[0])
+            else:
+                summary = f"[{len(files)} files selected] {', '.join(os.path.basename(f) for f in files[:2])}{'...' if len(files) > 2 else ''}"
+                self.ignore_path_entry.insert(0, summary)
+
             self._import_ignore_file()
 
     def _import_ignore_file(self):
-        path = self.ignore_path_entry.get().strip()
-        if not path:
-            return
-        codes = []
-        if os.path.isfile(path):
-            items = parse_file(path)
-            codes = [it.gccode for it in items]
-        elif os.path.isdir(path):
-            items = parse_folder(path)
-            codes = [it.gccode for it in items]
-        else:
-            messagebox.showwarning("Import", f"Path not found: {path}")
+        files_to_load = getattr(self, "selected_ignore_files", [])
+        raw = self.ignore_path_entry.get().strip()
+
+        # If user manually typed/pasted a path into entry
+        if not files_to_load or (raw and not raw.startswith("[") and (not files_to_load or raw != files_to_load[0])):
+            if ";" in raw:
+                files_to_load = [f.strip() for f in raw.split(";") if f.strip() and os.path.exists(f.strip())]
+            elif raw and os.path.exists(raw):
+                files_to_load = [raw]
+
+        if not files_to_load:
             return
 
-        if codes:
+        all_codes = []
+        for path in files_to_load:
+            if os.path.isfile(path):
+                items = parse_file(path)
+                all_codes.extend([it.gccode for it in items])
+            elif os.path.isdir(path):
+                items = parse_folder(path)
+                all_codes.extend([it.gccode for it in items])
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_codes = [c for c in all_codes if not (c in seen or seen.add(c))]
+
+        if unique_codes:
             current = self.txt_ignore_codes.get("1.0", "end").strip()
-            new_text = (current + "\n" if current else "") + "\n".join(codes) + "\n"
+            new_text = (current + "\n" if current else "") + "\n".join(unique_codes) + "\n"
             self.txt_ignore_codes.delete("1.0", "end")
             self.txt_ignore_codes.insert("1.0", new_text)
-            self.log(f"Imported {len(codes)} GC codes from '{os.path.basename(path)}' into Ignore List.", "info")
-            messagebox.showinfo("Imported", f"Successfully imported {len(codes)} GC codes!")
+            src_label = os.path.basename(files_to_load[0]) if len(files_to_load) == 1 else f"{len(files_to_load)} files"
+            self.log(f"Imported {len(unique_codes)} GC codes from {src_label} into Ignore List.", "info")
+            messagebox.showinfo("Imported", f"Successfully imported {len(unique_codes)} GC codes!")
         else:
             messagebox.showinfo("Import", "No GC codes found in given source.")
 
@@ -1680,6 +1755,28 @@ class UltimateApp:
             try:
                 res = logger.run_ignore(codes, on_log=self.log)
                 self.root.after(0, lambda: self._on_operation_done("Ignore list", res))
+            finally:
+                self.root.after(0, self._reset_controls)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _start_bulk_unignore(self):
+        raw = self.txt_ignore_codes.get("1.0", "end").strip()
+        codes = extract_gc_codes_from_string(raw)
+        if not codes:
+            messagebox.showwarning("Un-ignore", "No GC codes found to un-ignore.")
+            return
+
+        if not messagebox.askyesno("Confirm", f"Remove {len(codes)} caches from Ignore list (un-ignore)?"):
+            return
+
+        self.is_running = True
+        logger = CacheLogger(self.client, self.safety)
+
+        def worker():
+            try:
+                res = logger.run_unignore(codes, on_log=self.log)
+                self.root.after(0, lambda: self._on_operation_done("Un-ignore list", res))
             finally:
                 self.root.after(0, self._reset_controls)
 

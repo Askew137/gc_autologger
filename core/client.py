@@ -1006,3 +1006,88 @@ class GeocachingClient:
             return False, f"Ignore failed (HTTP {confirm_resp.status_code})"
         except Exception as e:
             return False, f"Error ignoring cache: {str(e)}"
+
+    def unignore_cache(self, gc_code: str) -> Tuple[bool, str]:
+        """
+        Remove cache from ignore list (un-ignore).
+        """
+        token = self.get_verification_token()
+        try:
+            listing_resp = self.session.get(f"{self.BASE_URL}/geocache/{gc_code}", timeout=12)
+            if listing_resp.status_code != 200:
+                return False, f"Could not open cache page ({listing_resp.status_code})"
+
+            # Find ignore link or GUID from listing HTML
+            guid = None
+            wpt_type_id = "2"
+
+            guid_match = re.search(r'bookmarks/ignore\.aspx\?guid=([a-f0-9\-]+)(?:&(?:amp;)?WptTypeID=(\d+))?', listing_resp.text, re.IGNORECASE)
+            if guid_match:
+                guid = guid_match.group(1)
+                if guid_match.group(2):
+                    wpt_type_id = guid_match.group(2)
+            else:
+                root_guid = re.search(r'data-geocache-guid="([a-f0-9\-]+)"', listing_resp.text)
+                if root_guid:
+                    guid = root_guid.group(1)
+                    wpt_match = re.search(r'data-wpt-type-id="(\d+)"', listing_resp.text)
+                    if wpt_match:
+                        wpt_type_id = wpt_match.group(1)
+                else:
+                    mark_match = re.search(r'bookmarks/mark\.aspx\?guid=([a-f0-9\-]+)(?:&(?:amp;)?WptTypeID=(\d+))?', listing_resp.text, re.IGNORECASE)
+                    if mark_match:
+                        guid = mark_match.group(1)
+                        if mark_match.group(2):
+                            wpt_type_id = mark_match.group(2)
+
+            if not guid:
+                return False, "Ignore/Un-ignore link not found on cache page."
+
+            ignore_url = f"{self.BASE_URL}/bookmarks/ignore.aspx?guid={guid}&WptTypeID={wpt_type_id}"
+            page_resp = self.session.get(ignore_url, timeout=12)
+            if page_resp.status_code != 200:
+                return False, f"Could not open ignore confirmation page ({page_resp.status_code})"
+
+            # Extract viewstates and form inputs
+            vs_match = re.search(r'id="__VIEWSTATE"\s+value="([^"]+)"', page_resp.text)
+            vsg_match = re.search(r'id="__VIEWSTATEGENERATOR"\s+value="([^"]+)"', page_resp.text)
+            ev_match = re.search(r'id="__EVENTVALIDATION"\s+value="([^"]+)"', page_resp.text)
+            btn_yes_match = re.search(r'name="ctl00\$ContentBody\$btnYes"\s+value="([^"]+)"', page_resp.text)
+
+            btn_value = html.unescape(btn_yes_match.group(1)) if btn_yes_match else ""
+
+            # Check if cache is already ignored:
+            is_unignore_button = any(w in btn_value.lower() for w in ["obnovit", "un-ignore", "unignore", "restore"])
+            is_already_listed = (
+                "je zařazen do" in page_resp.text.lower()
+                or "currently on your ignore list" in page_resp.text.lower()
+            )
+
+            # If it's not on the ignore list, it's already un-ignored
+            if not is_unignore_button and not is_already_listed:
+                return True, "Cache is not on Ignore list (already un-ignored)"
+
+            v_token = self._extract_request_verification_token(page_resp.text) or token or ""
+
+            post_data = {
+                "__EVENTTARGET": "",
+                "__EVENTARGUMENT": "",
+                "__VIEWSTATE": vs_match.group(1) if vs_match else "",
+                "__VIEWSTATEGENERATOR": vsg_match.group(1) if vsg_match else "",
+                "__EVENTVALIDATION": ev_match.group(1) if ev_match else "",
+                "__RequestVerificationToken": v_token,
+                "ctl00$ContentBody$btnYes": btn_value or "Yes, un-ignore it.",
+                "returnUrl": ""
+            }
+
+            headers = {
+                "Referer": ignore_url,
+                "Origin": self.BASE_URL
+            }
+
+            confirm_resp = self.session.post(ignore_url, data=post_data, headers=headers, timeout=12)
+            if confirm_resp.status_code == 200:
+                return True, "Removed from Ignore list (un-ignored)"
+            return False, f"Un-ignore failed (HTTP {confirm_resp.status_code})"
+        except Exception as e:
+            return False, f"Error un-ignoring cache: {str(e)}"
