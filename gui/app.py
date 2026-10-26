@@ -83,6 +83,14 @@ class UltimateApp:
         self._set_app_icon()
         self._init_client_session()
         self._check_active_checkpoint()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_window)
+
+    def _on_close_window(self):
+        if self.is_running:
+            if not messagebox.askyesno("Exit", "An operation is currently running. Stop and exit?", parent=self.root):
+                return
+            self.safety.cancel()
+        self.root.destroy()
 
     def _set_app_icon(self):
         """Set window icon and macOS Dock icon if assets exist."""
@@ -1120,7 +1128,10 @@ class UltimateApp:
             self._log_buffer.append(line)
             if not self._log_flush_pending:
                 self._log_flush_pending = True
-                self.root.after(35, self._flush_log_buffer)
+                try:
+                    self.root.after(35, self._flush_log_buffer)
+                except Exception:
+                    self._log_flush_pending = False
 
     def _flush_log_buffer(self):
         with self._log_lock:
@@ -1147,14 +1158,14 @@ class UltimateApp:
     def _export_console(self):
         content = self.txt_console.get("1.0", "end").strip()
         if not content:
-            messagebox.showinfo("Export", "Log is currently empty.")
+            messagebox.showinfo("Export", "Log is currently empty.", parent=self.root)
             return
         filename = f"log_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         path = filedialog.asksaveasfilename(defaultextension=".txt", initialfile=filename)
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
-            messagebox.showinfo("Export", f"Log successfully exported to:\n{path}")
+            messagebox.showinfo("Export", f"Log successfully exported to:\n{path}", parent=self.root)
 
     # --------------------------------------------------------------------------
     # Client Session Management
@@ -1207,10 +1218,10 @@ class UltimateApp:
         current_user = self.acc_combo.get()
         acc = self.config_mgr.get_account_by_username(current_user)
         if not acc:
-            messagebox.showwarning("Login", "Please select or add an account first.")
+            messagebox.showwarning("Login", "Please select or add an account first.", parent=self.root)
             return
         if not acc.password:
-            messagebox.showwarning("Login", f"Account '{acc.username}' has no password configured. Passwordless accounts can only be used as copy targets.")
+            messagebox.showwarning("Login", f"Account '{acc.username}' has no password configured. Passwordless accounts can only be used as copy targets.", parent=self.root)
             return
 
         def worker():
@@ -1223,7 +1234,7 @@ class UltimateApp:
             else:
                 self.root.after(0, lambda: self._update_status_badge(False, "● Login failed"))
                 self.log(f"Login failed: {msg}", "error")
-                messagebox.showerror("Login failed", msg)
+                self.root.after(0, lambda: messagebox.showerror("Login failed", msg, parent=self.root))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1244,7 +1255,7 @@ class UltimateApp:
                 self.root.after(0, lambda: self._update_status_badge(False, "● Not connected"))
                 self.log(f"Could not connect as '{acc.username}': {msg}", "error" if acc.password else "info")
                 if acc.password:
-                    messagebox.showerror("Login failed", f"Could not authenticate as '{acc.username}':\n\n{msg}")
+                    self.root.after(0, lambda: messagebox.showerror("Login failed", f"Could not authenticate as '{acc.username}':\n\n{msg}", parent=self.root))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1362,7 +1373,7 @@ class UltimateApp:
             self.coords_path_entry.insert(0, state.file_path)
             self._load_coords_from_path(state.file_path)
         elif not self.loaded_waypoints:
-            messagebox.showwarning("Resume upload", f"Source file was moved or deleted:\n{state.file_path}\nPlease re-select the file.")
+            messagebox.showwarning("Resume upload", f"Source file was moved or deleted:\n{state.file_path}\nPlease re-select the file.", parent=self.root)
             return
 
         self.coords_mode_var.set(state.mode)
@@ -1378,14 +1389,14 @@ class UltimateApp:
         self._start_coords_upload(resume=True)
 
     def _on_discard_coords_clicked(self):
-        if messagebox.askyesno("Discard checkpoint", "Discard progress from the unfinished upload?"):
+        if messagebox.askyesno("Discard checkpoint", "Discard progress from the unfinished upload?", parent=self.root):
             self.checkpoint_mgr.discard_coords_run()
             self.frame_resume_coords.pack_forget()
             self.log("Discarded unfinished upload checkpoint.", "info")
 
     def _start_coords_upload(self, resume: bool = False):
         if not self.loaded_waypoints:
-            messagebox.showwarning("Upload", "No waypoints loaded. Choose a GPX file first.")
+            messagebox.showwarning("Upload", "No waypoints loaded. Choose a GPX file first.", parent=self.root)
             return
         if self.is_running:
             return
@@ -1417,7 +1428,12 @@ class UltimateApp:
                     resume=resume,
                     omit_virtual_and_earth=self.config.filters.omit_virtual_earth_webcam
                 )
+                self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Coordinates upload", res))
+            except Exception as e:
+                self.log(f"Error during coordinate upload: {e}", "error")
+                self.root.after(0, self._reset_controls)
+                self.root.after(0, lambda: self._on_operation_error("Coordinates upload", str(e)))
             finally:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, self._check_active_checkpoint)
@@ -1453,7 +1469,7 @@ class UltimateApp:
         raw_text = self.txt_gc_codes.get("1.0", "end").strip()
         codes = extract_gc_codes_from_string(raw_text)
         if not codes:
-            messagebox.showwarning("Log caches", "No valid GC codes found. Please paste GC codes or import a GPX.")
+            messagebox.showwarning("Log caches", "No valid GC codes found. Please paste GC codes or import a GPX.", parent=self.root)
             return
         if self.is_running:
             return
@@ -1464,7 +1480,8 @@ class UltimateApp:
         if mode == "DELETE":
             if not messagebox.askyesno(
                 "Confirm delete logs",
-                f"Are you sure you want to permanently delete your log(s) for {len(codes)} cache(s)?\n\nThis cannot be undone. Continue?"
+                f"Are you sure you want to permanently delete your log(s) for {len(codes)} cache(s)?\n\nThis cannot be undone. Continue?",
+                parent=self.root
             ):
                 return
 
@@ -1484,7 +1501,12 @@ class UltimateApp:
                         on_progress=on_progress_del,
                         on_log=self.log
                     )
+                    self.root.after(0, self._reset_controls)
                     self.root.after(0, lambda: self._on_operation_done("Bulk delete logs", res))
+                except Exception as e:
+                    self.log(f"Error during bulk delete logs: {e}", "error")
+                    self.root.after(0, self._reset_controls)
+                    self.root.after(0, lambda: self._on_operation_error("Bulk delete logs", str(e)))
                 finally:
                     self.root.after(0, self._reset_controls)
 
@@ -1527,7 +1549,12 @@ class UltimateApp:
                         on_progress=on_progress_edit,
                         on_log=self.log
                     )
+                    self.root.after(0, self._reset_controls)
                     self.root.after(0, lambda: self._on_operation_done("Bulk edit logs", res))
+                except Exception as e:
+                    self.log(f"Error during bulk edit logs: {e}", "error")
+                    self.root.after(0, self._reset_controls)
+                    self.root.after(0, lambda: self._on_operation_error("Bulk edit logs", str(e)))
                 finally:
                     self.root.after(0, self._reset_controls)
 
@@ -1543,7 +1570,7 @@ class UltimateApp:
                 break
 
         if type_key == "NEEDS_REVIEWER_ATTENTION":
-            if not messagebox.askyesno("Warning", "You selected 'Needs archive'. This alerts reviewers to ALL listed caches. Continue?"):
+            if not messagebox.askyesno("Warning", "You selected 'Needs archive'. This alerts reviewers to ALL listed caches. Continue?", parent=self.root):
                 return
 
         date_str = self._parse_to_iso_date(self.entry_date.get())
@@ -1569,7 +1596,12 @@ class UltimateApp:
                     on_log=self.log,
                     omit_virtual_and_earth=self.config.filters.omit_virtual_earth_webcam
                 )
+                self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Bulk logging", res))
+            except Exception as e:
+                self.log(f"Error during bulk logging: {e}", "error")
+                self.root.after(0, self._reset_controls)
+                self.root.after(0, lambda: self._on_operation_error("Bulk logging", str(e)))
             finally:
                 self.root.after(0, self._reset_controls)
 
@@ -1584,11 +1616,11 @@ class UltimateApp:
         target_pwd = self.entry_copy_pwd.get().strip() if self.var_password_mode.get() else None
 
         if not target_user:
-            messagebox.showwarning("Copy user", "Enter a target username.")
+            messagebox.showwarning("Copy user", "Enter a target username.", parent=self.root)
             return
 
         if self.var_password_mode.get() and not target_pwd:
-            messagebox.showwarning("Copy user", "Password mode is enabled, but no password was entered.\nPlease enter a password or uncheck Password mode.")
+            messagebox.showwarning("Copy user", "Password mode is enabled, but no password was entered.\nPlease enter a password or uncheck Password mode.", parent=self.root)
             return
 
         end_date_raw = self.entry_copy_date.get()
@@ -1728,24 +1760,26 @@ class UltimateApp:
             self.txt_ignore_codes.insert("1.0", new_text)
             src_label = os.path.basename(files_to_load[0]) if len(files_to_load) == 1 else f"{len(files_to_load)} files"
             self.log(f"Imported {len(unique_codes)} GC codes from {src_label} into Ignore List.", "info")
-            messagebox.showinfo("Imported", f"Successfully imported {len(unique_codes)} GC codes!")
+            messagebox.showinfo("Imported", f"Successfully imported {len(unique_codes)} GC codes!", parent=self.root)
         else:
-            messagebox.showinfo("Import", "No GC codes found in given source.")
+            messagebox.showinfo("Import", "No GC codes found in given source.", parent=self.root)
 
     def _insert_copied_codes(self, codes: List[str]):
         self.tabview.set("📝 Bulk log caches")
         self.txt_gc_codes.delete("1.0", "end")
         self.txt_gc_codes.insert("1.0", " ".join(codes))
-        messagebox.showinfo("Caches loaded", f"Loaded {len(codes)} caches into Bulk Logging tab!")
+        messagebox.showinfo("Caches loaded", f"Loaded {len(codes)} caches into Bulk Logging tab!", parent=self.root)
 
     def _start_bulk_ignore(self):
+        if self.is_running:
+            return
         raw = self.txt_ignore_codes.get("1.0", "end").strip()
         codes = extract_gc_codes_from_string(raw)
         if not codes:
-            messagebox.showwarning("Ignore", "No GC codes found to ignore.")
+            messagebox.showwarning("Ignore", "No GC codes found to ignore.", parent=self.root)
             return
 
-        if not messagebox.askyesno("Confirm", f"Add {len(codes)} caches to Ignore list?"):
+        if not messagebox.askyesno("Confirm", f"Add {len(codes)} caches to Ignore list?", parent=self.root):
             return
 
         self.is_running = True
@@ -1754,20 +1788,27 @@ class UltimateApp:
         def worker():
             try:
                 res = logger.run_ignore(codes, on_log=self.log)
+                self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Ignore list", res))
+            except Exception as e:
+                self.log(f"Error during ignore update: {e}", "error")
+                self.root.after(0, self._reset_controls)
+                self.root.after(0, lambda: self._on_operation_error("Ignore list", str(e)))
             finally:
                 self.root.after(0, self._reset_controls)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _start_bulk_unignore(self):
+        if self.is_running:
+            return
         raw = self.txt_ignore_codes.get("1.0", "end").strip()
         codes = extract_gc_codes_from_string(raw)
         if not codes:
-            messagebox.showwarning("Un-ignore", "No GC codes found to un-ignore.")
+            messagebox.showwarning("Un-ignore", "No GC codes found to un-ignore.", parent=self.root)
             return
 
-        if not messagebox.askyesno("Confirm", f"Remove {len(codes)} caches from Ignore list (un-ignore)?"):
+        if not messagebox.askyesno("Confirm", f"Remove {len(codes)} caches from Ignore list (un-ignore)?", parent=self.root):
             return
 
         self.is_running = True
@@ -1776,7 +1817,12 @@ class UltimateApp:
         def worker():
             try:
                 res = logger.run_unignore(codes, on_log=self.log)
+                self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Un-ignore list", res))
+            except Exception as e:
+                self.log(f"Error during un-ignore update: {e}", "error")
+                self.root.after(0, self._reset_controls)
+                self.root.after(0, lambda: self._on_operation_error("Un-ignore list", str(e)))
             finally:
                 self.root.after(0, self._reset_controls)
 
@@ -1791,7 +1837,7 @@ class UltimateApp:
         p = self.new_acc_pwd.get().strip()
         d = bool(self.new_acc_default.get())
         if not u:
-            messagebox.showwarning("Account", "Username is required.")
+            messagebox.showwarning("Account", "Username is required.", parent=self.root)
             return
         self.config_mgr.add_or_update_account(u, p, is_default=d)
         self.new_acc_user.delete(0, "end")
@@ -1803,7 +1849,7 @@ class UltimateApp:
         self.log(f"Account '{u}' added to config.", "success")
 
     def _on_delete_account(self, acc_id: str):
-        if messagebox.askyesno("Delete account", "Remove this account from configuration?"):
+        if messagebox.askyesno("Delete account", "Remove this account from configuration?", parent=self.root):
             acc = self.config_mgr.get_account_by_id(acc_id)
             if acc and hasattr(self, "client"):
                 self.client.clear_cookies(acc.username)
@@ -2049,10 +2095,10 @@ class UltimateApp:
     def _on_add_template(self):
         t = self.new_tmpl_entry.get().strip()
         if not t:
-            messagebox.showwarning("Log template", "Template text cannot be empty.")
+            messagebox.showwarning("Log template", "Template text cannot be empty.", parent=self.root)
             return
         if t in self.config.log_templates:
-            messagebox.showwarning("Log template", "This template already exists.")
+            messagebox.showwarning("Log template", "This template already exists.", parent=self.root)
             return
         self.config.log_templates.append(t)
         self.config_mgr.save()
@@ -2065,7 +2111,7 @@ class UltimateApp:
         if 0 <= index < len(self.config.log_templates):
             tmpl_text = self.config.log_templates[index]
             display_snip = (tmpl_text[:40] + "...") if len(tmpl_text) > 40 else tmpl_text
-            if messagebox.askyesno("Delete template", f"Remove template #{index + 1}?\n\"{display_snip}\""):
+            if messagebox.askyesno("Delete template", f"Remove template #{index + 1}?\n\"{display_snip}\"", parent=self.root):
                 self.config.log_templates.pop(index)
                 if not self.config.log_templates:
                     self.config.log_templates = ["TFTC."]
@@ -2105,12 +2151,12 @@ class UltimateApp:
             self.safety.breather_duration = self.config.safety.breather_duration_seconds
 
             if self.config_mgr.save():
-                messagebox.showinfo("Saved", "Settings successfully saved to config.json!")
+                messagebox.showinfo("Saved", "Settings successfully saved to config.json!", parent=self.root)
                 self.log("Configuration updated and saved.", "success")
             else:
-                messagebox.showerror("Error", "Failed to save config.json")
+                messagebox.showerror("Error", "Failed to save config.json", parent=self.root)
         except ValueError as e:
-            messagebox.showerror("Validation error", f"Invalid number format: {e}")
+            messagebox.showerror("Validation error", f"Invalid number format: {e}", parent=self.root)
 
     @staticmethod
     def _parse_to_iso_date(text: str) -> str:
@@ -2163,7 +2209,7 @@ class UltimateApp:
             self.log("Operation paused by user.", "warning")
 
     def _stop_operation(self):
-        if messagebox.askyesno("Stop", "Stop the current batch operation?"):
+        if messagebox.askyesno("Stop", "Stop the current batch operation?", parent=self.root):
             self.safety.cancel()
             self.log("Cancelling operation...", "warning")
 
@@ -2175,20 +2221,110 @@ class UltimateApp:
             self.lbl_eta.configure(text=f"ETA: {m:02d}m {s:02d}s")
 
     def _on_operation_done(self, title: str, res: Dict[str, Any]):
-        msg = f"{title} finished!\n\nSuccess: {res.get('success', 0)}\nFailed: {res.get('failed', 0)}"
-        if "skipped" in res:
-            msg += f"\nSkipped (Already modified): {res.get('skipped', 0)}"
-        msg += f"\nElapsed: {res.get('elapsed_seconds', 0):.1f}s"
-        messagebox.showinfo("Operation complete", msg)
+        self._flush_log_buffer()
+        self._reset_controls()
+        if hasattr(self, "_check_active_checkpoint"):
+            self._check_active_checkpoint()
+
+        success = res.get("success", 0)
+        failed = res.get("failed", 0)
+        skipped = res.get("skipped", 0)
+        elapsed = res.get("elapsed_seconds", 0.0)
+
+        if hasattr(self, "progress_bar"):
+            self.progress_bar.set(1.0)
+        if hasattr(self, "lbl_progress_text"):
+            summary_short = f"Done: {success} OK, {failed} failed"
+            if skipped:
+                summary_short += f", {skipped} skipped"
+            summary_short += f" ({elapsed:.1f}s)"
+            self.lbl_progress_text.configure(text=summary_short)
+        if hasattr(self, "lbl_eta"):
+            self.lbl_eta.configure(text="ETA: 00:00")
+
+        self._show_completion_dialog(title, res)
+
+    def _on_operation_error(self, title: str, error_msg: str):
+        self._flush_log_buffer()
+        self._reset_controls()
+        if hasattr(self, "_check_active_checkpoint"):
+            self._check_active_checkpoint()
+        if hasattr(self, "lbl_progress_text"):
+            self.lbl_progress_text.configure(text=f"Error: {error_msg[:40]}")
+        messagebox.showerror(f"{title} Error", f"An unexpected error occurred during {title}:\n\n{error_msg}", parent=self.root)
+
+    def _show_completion_dialog(self, title: str, res: Dict[str, Any]):
+        if not CTK_AVAILABLE or not hasattr(self, "root") or not self.root.winfo_exists():
+            return
+
+        success = res.get("success", 0)
+        failed = res.get("failed", 0)
+        skipped = res.get("skipped", 0)
+        elapsed = res.get("elapsed_seconds", 0.0)
+
+        try:
+            dialog = ctk.CTkToplevel(self.root)
+            dialog.title("Operation complete")
+            dialog.geometry("380x250")
+            dialog.resizable(False, False)
+            dialog.transient(self.root)
+            dialog.attributes("-topmost", True)
+
+            self._center_toplevel(dialog, 380, 250)
+
+            card = ctk.CTkFrame(dialog, fg_color=theme.CARD_BG, corner_radius=8)
+            card.pack(fill="both", expand=True, padx=16, pady=16)
+
+            header_color = theme.ACCENT_GREEN if failed == 0 else theme.ACCENT_RED
+            header_text = f"✅ {title} complete!" if failed == 0 else f"⚠️ {title} completed with errors"
+            ctk.CTkLabel(
+                card,
+                text=header_text,
+                font=ctk.CTkFont(size=15, weight="bold"),
+                text_color=header_color
+            ).pack(pady=(12, 10))
+
+            stats_frame = ctk.CTkFrame(card, fg_color="transparent")
+            stats_frame.pack(fill="x", padx=16, pady=4)
+
+            ctk.CTkLabel(stats_frame, text=f"• Succeeded: {success}", font=ctk.CTkFont(size=13), text_color=theme.ACCENT_GREEN).pack(anchor="w", pady=2)
+            if skipped:
+                ctk.CTkLabel(stats_frame, text=f"• Skipped (Already modified): {skipped}", font=ctk.CTkFont(size=13), text_color=theme.ACCENT_BLUE).pack(anchor="w", pady=2)
+            fail_color = theme.ACCENT_RED if failed > 0 else theme.TEXT_MUTED
+            ctk.CTkLabel(stats_frame, text=f"• Failed: {failed}", font=ctk.CTkFont(size=13), text_color=fail_color).pack(anchor="w", pady=2)
+            ctk.CTkLabel(stats_frame, text=f"• Elapsed time: {elapsed:.1f}s", font=ctk.CTkFont(size=12), text_color=theme.TEXT_MUTED).pack(anchor="w", pady=2)
+
+            btn_ok = ctk.CTkButton(
+                card,
+                text="OK",
+                width=100,
+                fg_color=theme.ACCENT_GREEN,
+                hover_color=theme.ACCENT_GREEN_HOVER,
+                command=dialog.destroy
+            )
+            btn_ok.pack(pady=(12, 10))
+
+            dialog.bind("<Return>", lambda e: dialog.destroy())
+            dialog.bind("<Escape>", lambda e: dialog.destroy())
+            dialog.bind("<space>", lambda e: dialog.destroy())
+
+            btn_ok.focus_set()
+        except Exception:
+            pass
 
     def _reset_controls(self):
         self.is_running = False
-        self.btn_coords_start.configure(state="normal")
-        self.btn_coords_pause.configure(state="disabled", text="⏸ Pause")
-        self.btn_coords_stop.configure(state="disabled")
-        self.btn_log_start.configure(state="normal")
-        self.lbl_progress_text.configure(text="Finished")
-        self.lbl_eta.configure(text="ETA: --:--")
+        self._flush_log_buffer()
+        if hasattr(self, "btn_coords_start"):
+            self.btn_coords_start.configure(state="normal")
+        if hasattr(self, "btn_coords_pause"):
+            self.btn_coords_pause.configure(state="disabled", text="⏸ Pause")
+        if hasattr(self, "btn_coords_stop"):
+            self.btn_coords_stop.configure(state="disabled")
+        if hasattr(self, "btn_log_start"):
+            self.btn_log_start.configure(state="normal")
+        if hasattr(self, "lbl_eta"):
+            self.lbl_eta.configure(text="ETA: --:--")
 
     def run(self):
         """Start the GUI main loop."""
