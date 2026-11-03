@@ -32,12 +32,70 @@ def _strip_namespaces(root: ET.Element) -> None:
             elem.tag = elem.tag.split('}', 1)[1]
 
 
-def is_virtual_or_earth(cache_type: str) -> bool:
-    """Check if a cache type string represents a Virtual, EarthCache, or Webcam cache."""
-    if not cache_type:
+def is_virtual_cache(cache_type: Any) -> bool:
+    """Check if cache type represents a Virtual or Locationless cache (accepts name or ID)."""
+    if cache_type is None:
         return False
-    low = cache_type.strip().lower()
-    return any(k in low for k in ["virtual", "earthcache", "earth cache", "webcam"])
+    if isinstance(cache_type, int) or (isinstance(cache_type, str) and cache_type.isdigit()):
+        return int(cache_type) in (4, 12)
+    low = str(cache_type).strip().lower()
+    return "virtual" in low or "locationless" in low
+
+
+def is_earth_cache(cache_type: Any) -> bool:
+    """Check if cache type represents an EarthCache (accepts name or ID)."""
+    if cache_type is None:
+        return False
+    if isinstance(cache_type, int) or (isinstance(cache_type, str) and cache_type.isdigit()):
+        return int(cache_type) == 137
+    low = str(cache_type).strip().lower()
+    return "earthcache" in low or "earth cache" in low
+
+
+def is_event_cache(cache_type: Any) -> bool:
+    """Check if cache type represents any kind of Event (accepts name or ID)."""
+    if cache_type is None:
+        return False
+    if isinstance(cache_type, int) or (isinstance(cache_type, str) and cache_type.isdigit()):
+        return int(cache_type) in (6, 13, 453, 7005, 3653, 3774, 4738, 1304)
+    low = str(cache_type).strip().lower()
+    event_keywords = ["event", "cito", "celebration", "block party", "gps exhibit", "gps adventure", "lost and found", "maze"]
+    return any(k in low for k in event_keywords)
+
+
+def is_webcam_cache(cache_type: Any) -> bool:
+    """Check if cache type represents a Webcam cache (accepts name or ID)."""
+    if cache_type is None:
+        return False
+    if isinstance(cache_type, int) or (isinstance(cache_type, str) and cache_type.isdigit()):
+        return int(cache_type) == 11
+    return "webcam" in str(cache_type).strip().lower()
+
+
+def is_cache_filtered(
+    cache_type: Any,
+    omit_virtual: bool = False,
+    omit_earth: bool = False,
+    omit_events: bool = False,
+    omit_webcam: bool = False
+) -> bool:
+    """Check if cache matches any of the active filter criteria."""
+    if cache_type is None:
+        return False
+    if omit_virtual and is_virtual_cache(cache_type):
+        return True
+    if omit_earth and is_earth_cache(cache_type):
+        return True
+    if omit_events and is_event_cache(cache_type):
+        return True
+    if omit_webcam and is_webcam_cache(cache_type):
+        return True
+    return False
+
+
+def is_virtual_or_earth(cache_type: str) -> bool:
+    """Check if a cache type string represents a Virtual, EarthCache, or Webcam cache (legacy helper)."""
+    return is_virtual_cache(cache_type) or is_earth_cache(cache_type) or is_webcam_cache(cache_type)
 
 
 def parse_gpx_file(file_path: str) -> List[WaypointItem]:

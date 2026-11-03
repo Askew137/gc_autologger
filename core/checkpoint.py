@@ -25,6 +25,21 @@ class CoordsRunState:
     status: str = "in_progress"  # in_progress, completed, cancelled
 
 
+@dataclass
+class LoggingRunState:
+    run_id: str
+    log_type_key: str
+    date_str: str
+    log_text: str
+    total: int
+    all_gccodes: List[str] = field(default_factory=list)
+    completed_gccodes: List[str] = field(default_factory=list)
+    failed_items: List[Dict[str, str]] = field(default_factory=list)
+    started_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    status: str = "in_progress"  # in_progress, completed, cancelled
+
+
 class RunCheckpointManager:
     """Manages active run state files and crash recovery logs."""
 
@@ -37,6 +52,9 @@ class RunCheckpointManager:
 
         self.coords_state_file = os.path.join(self.runs_dir, "active_coords_run.json")
         self.coords_log_file = os.path.join(self.runs_dir, "active_coords_run.log")
+
+        self.logging_state_file = os.path.join(self.runs_dir, "active_logging_run.json")
+        self.logging_log_file = os.path.join(self.runs_dir, "active_logging_run.log")
 
     def has_active_coords_run(self) -> bool:
         """Check if an unfinished coordinate upload run exists."""
@@ -164,5 +182,142 @@ class RunCheckpointManager:
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(asdict(state), f, indent=2)
             os.replace(tmp_file, self.coords_state_file)
+        except Exception:
+            pass
+
+    # --------------------------------------------------------------------------
+    # Bulk Logging Run Checkpoints
+    # --------------------------------------------------------------------------
+
+    def has_active_logging_run(self) -> bool:
+        """Check if an unfinished bulk logging run exists."""
+        state = self.load_active_logging_run()
+        return state is not None and state.status == "in_progress" and len(state.completed_gccodes) < state.total
+
+    def load_active_logging_run(self) -> Optional[LoggingRunState]:
+        """Load the active bulk logging run state from disk."""
+        if not os.path.exists(self.logging_state_file):
+            return None
+        try:
+            with open(self.logging_state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return LoggingRunState(
+                run_id=data.get("run_id", ""),
+                log_type_key=data.get("log_type_key", "found"),
+                date_str=data.get("date_str", ""),
+                log_text=data.get("log_text", ""),
+                total=data.get("total", 0),
+                all_gccodes=data.get("all_gccodes", []),
+                completed_gccodes=data.get("completed_gccodes", []),
+                failed_items=data.get("failed_items", []),
+                started_at=data.get("started_at", 0.0),
+                updated_at=data.get("updated_at", 0.0),
+                status=data.get("status", "in_progress")
+            )
+        except Exception:
+            return None
+
+    def start_logging_run(
+        self,
+        log_type_key: str,
+        date_str: str,
+        log_text: str,
+        all_gccodes: List[str],
+        existing_completed: Optional[List[str]] = None
+    ) -> LoggingRunState:
+        """Initialize a new bulk logging run or resume an existing one."""
+        run_id = f"log_{int(time.time())}"
+        completed = list(existing_completed) if existing_completed else []
+        state = LoggingRunState(
+            run_id=run_id,
+            log_type_key=log_type_key,
+            date_str=date_str,
+            log_text=log_text,
+            total=len(all_gccodes),
+            all_gccodes=all_gccodes,
+            completed_gccodes=completed,
+            started_at=time.time(),
+            updated_at=time.time(),
+            status="in_progress"
+        )
+        self._save_logging_state(state)
+        if not existing_completed:
+            try:
+                with open(self.logging_log_file, "w", encoding="utf-8") as f:
+                    f.write(f"--- Bulk Logging run started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            except Exception:
+                pass
+        return state
+
+    def record_log_item(self, gccode: str, success: bool, reason: str = "") -> None:
+        """Record a logged cache as completed or failed and flush state to disk."""
+        state = self.load_active_logging_run()
+        if not state:
+            return
+
+        if success:
+            if gccode not in state.completed_gccodes:
+                state.completed_gccodes.append(gccode)
+        else:
+            state.failed_items.append({"gccode": gccode, "reason": reason})
+
+        state.updated_at = time.time()
+        self._save_logging_state(state)
+
+    def append_logging_log(self, message: str) -> None:
+        """Append a message line to the active logging run log file."""
+        try:
+            timestamp = time.strftime("[%H:%M:%S]")
+            with open(self.logging_log_file, "a", encoding="utf-8") as f:
+                f.write(f"{timestamp} {message}\n")
+        except Exception:
+            pass
+
+    def read_saved_logging_logs(self, max_lines: int = 150) -> List[str]:
+        """Read recent lines from the active logging run log file."""
+        if not os.path.exists(self.logging_log_file):
+            return []
+        try:
+            with open(self.logging_log_file, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [line.rstrip() for line in f.readlines()]
+                return lines[-max_lines:]
+        except Exception:
+            return []
+
+    def finish_logging_run(self, status: str = "completed") -> None:
+        """Mark active logging run as completed or cancelled and remove active checkpoint."""
+        if os.path.exists(self.logging_state_file):
+            try:
+                state = self.load_active_logging_run()
+                if state:
+                    state.status = status
+                    state.updated_at = time.time()
+                    archive_path = os.path.join(self.runs_dir, f"{state.run_id}_{status}.json")
+                    with open(archive_path, "w", encoding="utf-8") as f:
+                        json.dump(asdict(state), f, indent=2)
+                os.remove(self.logging_state_file)
+            except Exception:
+                pass
+
+    def discard_logging_run(self) -> None:
+        """Discard active bulk logging run checkpoint and its log."""
+        if os.path.exists(self.logging_state_file):
+            try:
+                os.remove(self.logging_state_file)
+            except Exception:
+                pass
+        if os.path.exists(self.logging_log_file):
+            try:
+                os.remove(self.logging_log_file)
+            except Exception:
+                pass
+
+    def _save_logging_state(self, state: LoggingRunState) -> None:
+        """Atomically save logging state to disk."""
+        tmp_file = f"{self.logging_state_file}.tmp"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(asdict(state), f, indent=2)
+            os.replace(tmp_file, self.logging_state_file)
         except Exception:
             pass

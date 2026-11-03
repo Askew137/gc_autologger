@@ -26,7 +26,7 @@ from core.config import ConfigManager, AccountConfig, get_base_dir, get_bundle_d
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
-from core.gpx_parser import parse_file, parse_folder, extract_gc_codes_from_string, WaypointItem, is_virtual_or_earth
+from core.gpx_parser import parse_file, parse_folder, extract_gc_codes_from_string, WaypointItem, is_virtual_or_earth, is_cache_filtered
 from operations.coordinate_uploader import CoordinateUploader
 from operations.cache_logger import CacheLogger, LOG_TYPE_MAP, LOG_TYPE_NAMES
 from operations.user_copy import UserLogCopier
@@ -464,13 +464,62 @@ class UltimateApp:
         self.txt_gc_codes.pack(fill="both", expand=True, padx=10, pady=4)
 
         btn_row = ctk.CTkFrame(right_box, fg_color="transparent")
-        btn_row.pack(fill="x", padx=10, pady=6)
+        btn_row.pack(fill="x", padx=10, pady=4)
         ctk.CTkButton(btn_row, text="Import from GPX", width=120, command=self._import_codes_from_file).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Clear codes", width=90, fg_color=theme.CARD_BORDER, command=lambda: self.txt_gc_codes.delete("1.0", "end")).pack(side="left", padx=4)
 
-        # Start Log Button
-        self.btn_log_start = ctk.CTkButton(
+        self.var_skip_already_found = ctk.BooleanVar(value=False)
+        self.chk_skip_already_found = ctk.CTkCheckBox(
+            right_box,
+            text="Skip already found caches (Check duplicates)",
+            font=ctk.CTkFont(size=12),
+            variable=self.var_skip_already_found
+        )
+        self.chk_skip_already_found.pack(anchor="w", padx=10, pady=(2, 6))
+
+        # Resume banner frame (shown if an unfinished logging run is detected)
+        self.frame_resume_logging = ctk.CTkFrame(
             self.tab_logger,
+            fg_color="#2b2613",
+            border_width=1,
+            border_color="#d48806",
+            corner_radius=6
+        )
+        self.lbl_resume_logging_info = ctk.CTkLabel(
+            self.frame_resume_logging,
+            text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#f5c056"
+        )
+        self.lbl_resume_logging_info.pack(side="left", padx=12, pady=8)
+
+        self.btn_discard_logging_action = ctk.CTkButton(
+            self.frame_resume_logging,
+            text="✕ Discard",
+            width=75,
+            height=28,
+            fg_color=theme.ACCENT_RED,
+            command=self._on_discard_logging_clicked
+        )
+        self.btn_discard_logging_action.pack(side="right", padx=8, pady=6)
+
+        self.btn_resume_logging_action = ctk.CTkButton(
+            self.frame_resume_logging,
+            text="▶ Resume logging",
+            width=125,
+            height=28,
+            fg_color=theme.ACCENT_GREEN,
+            hover_color=theme.ACCENT_GREEN_HOVER,
+            command=self._on_resume_logging_clicked
+        )
+        self.btn_resume_logging_action.pack(side="right", padx=4, pady=6)
+
+        # Control buttons (Start / Pause / Stop)
+        ctrl_frame_log = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
+        ctrl_frame_log.pack(fill="x", padx=14, pady=8)
+
+        self.btn_log_start = ctk.CTkButton(
+            ctrl_frame_log,
             text="▶ Start bulk logging",
             font=ctk.CTkFont(weight="bold"),
             fg_color=theme.ACCENT_GREEN,
@@ -478,7 +527,28 @@ class UltimateApp:
             height=36,
             command=self._start_bulk_logging
         )
-        self.btn_log_start.pack(anchor="w", padx=14, pady=8)
+        self.btn_log_start.pack(side="left", padx=(0, 6))
+
+        self.btn_log_pause = ctk.CTkButton(
+            ctrl_frame_log,
+            text="⏸ Pause",
+            width=90,
+            height=36,
+            state="disabled",
+            command=self._toggle_pause
+        )
+        self.btn_log_pause.pack(side="left", padx=6)
+
+        self.btn_log_stop = ctk.CTkButton(
+            ctrl_frame_log,
+            text="⏹ Stop",
+            width=90,
+            height=36,
+            fg_color=theme.ACCENT_RED,
+            state="disabled",
+            command=self._stop_operation
+        )
+        self.btn_log_stop.pack(side="left", padx=6)
 
     def _on_logger_mode_changed(self, mode_val: str):
         if mode_val == "Create logs":
@@ -686,6 +756,7 @@ class UltimateApp:
 
         ctk.CTkButton(file_frame, text="Browse file(s)", width=110, command=self._browse_ignore_file).pack(side="left", padx=3)
         ctk.CTkButton(file_frame, text="Import to list", width=100, fg_color=theme.ACCENT_BLUE, command=self._import_ignore_file).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="📥 Fetch ignored caches", width=145, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=3)
 
         # Text input & review
         ctk.CTkLabel(box, text="GC codes to process (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
@@ -782,22 +853,52 @@ class UltimateApp:
         filter_content = ctk.CTkFrame(filter_sec, fg_color="transparent")
         filter_content.pack(fill="x", padx=12, pady=(4, 12))
 
-        self.var_omit_virtual_earth = ctk.BooleanVar(value=self.config.filters.omit_virtual_earth_webcam)
-        self.chk_omit_virtual_earth = ctk.CTkCheckBox(
+        self.var_omit_virtual = ctk.BooleanVar(value=self.config.filters.omit_virtual)
+        self.chk_omit_virtual = ctk.CTkCheckBox(
             filter_content,
-            text="Omit virtual, earth, and webcam caches",
+            text="Omit Virtual caches (Virtual, Locationless)",
             font=ctk.CTkFont(size=13),
-            variable=self.var_omit_virtual_earth,
-            command=self._on_toggle_omit_virtual_earth
+            variable=self.var_omit_virtual,
+            command=self._on_toggle_filters
         )
-        self.chk_omit_virtual_earth.pack(anchor="w", padx=4, pady=4)
+        self.chk_omit_virtual.pack(anchor="w", padx=4, pady=3)
+
+        self.var_omit_earth = ctk.BooleanVar(value=self.config.filters.omit_earthcache)
+        self.chk_omit_earth = ctk.CTkCheckBox(
+            filter_content,
+            text="Omit EarthCaches",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_omit_earth,
+            command=self._on_toggle_filters
+        )
+        self.chk_omit_earth.pack(anchor="w", padx=4, pady=3)
+
+        self.var_omit_events = ctk.BooleanVar(value=self.config.filters.omit_events)
+        self.chk_omit_events = ctk.CTkCheckBox(
+            filter_content,
+            text="Omit Events (Event, Mega, Giga, CITO, Celebration, GPS Maze)",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_omit_events,
+            command=self._on_toggle_filters
+        )
+        self.chk_omit_events.pack(anchor="w", padx=4, pady=3)
+
+        self.var_omit_webcam = ctk.BooleanVar(value=self.config.filters.omit_webcam)
+        self.chk_omit_webcam = ctk.CTkCheckBox(
+            filter_content,
+            text="Omit Webcam caches",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_omit_webcam,
+            command=self._on_toggle_filters
+        )
+        self.chk_omit_webcam.pack(anchor="w", padx=4, pady=3)
 
         ctk.CTkLabel(
             filter_content,
-            text="💡 Automatically skips Virtual, EarthCache, and Webcam types during coordinate uploading and bulk logging.",
+            text="💡 Automatically skips selected cache types during Coordinate Upload, Bulk Logging, and Copy User.",
             font=ctk.CTkFont(size=11),
             text_color=theme.TEXT_MUTED
-        ).pack(anchor="w", padx=4, pady=(0, 4))
+        ).pack(anchor="w", padx=4, pady=(2, 4))
 
         # 4. Safety & Delays Section
         safety_sec = ctk.CTkFrame(scroll)
@@ -1330,11 +1431,21 @@ class UltimateApp:
 
         self.loaded_waypoints = list(all_waypoints_map.values())
 
-        if self.config.filters.omit_virtual_earth_webcam:
+        f_cfg = self.config.filters
+        if f_cfg.omit_virtual or f_cfg.omit_earth or f_cfg.omit_events or f_cfg.omit_webcam:
             orig_count = len(self.loaded_waypoints)
-            self.loaded_waypoints = [w for w in self.loaded_waypoints if not is_virtual_or_earth(w.cache_type)]
+            self.loaded_waypoints = [
+                w for w in self.loaded_waypoints
+                if not is_cache_filtered(
+                    w.cache_type,
+                    omit_virtual=f_cfg.omit_virtual,
+                    omit_earth=f_cfg.omit_earth,
+                    omit_events=f_cfg.omit_events,
+                    omit_webcam=f_cfg.omit_webcam
+                )
+            ]
             omitted = orig_count - len(self.loaded_waypoints)
-            filter_msg = f" ({omitted} virtual/earth/webcam omitted by filter)" if omitted else ""
+            filter_msg = f" ({omitted} omitted by filter)" if omitted else ""
         else:
             filter_msg = ""
 
@@ -1348,19 +1459,32 @@ class UltimateApp:
         self.log(f"Loaded {count} waypoints from {src_label}{filter_msg}.", "info")
 
     def _check_active_checkpoint(self):
-        if not hasattr(self, "frame_resume_coords"):
-            return
-        if self.checkpoint_mgr.has_active_coords_run() and not self.is_running:
-            state = self.checkpoint_mgr.load_active_coords_run()
-            if state:
-                fname = os.path.basename(state.file_path) or "GPX batch"
-                done = len(state.completed_gccodes)
-                self.lbl_resume_info.configure(
-                    text=f"⚠️ Unfinished upload detected: '{fname}' ({done}/{state.total} caches processed)."
-                )
-                self.frame_resume_coords.pack(fill="x", pady=6, padx=6, before=self.coords_opt_frame)
-        else:
-            self.frame_resume_coords.pack_forget()
+        # 1. Coordinate upload run checkpoint
+        if hasattr(self, "frame_resume_coords"):
+            if self.checkpoint_mgr.has_active_coords_run() and not self.is_running:
+                state = self.checkpoint_mgr.load_active_coords_run()
+                if state:
+                    fname = os.path.basename(state.file_path) or "GPX batch"
+                    done = len(state.completed_gccodes)
+                    self.lbl_resume_info.configure(
+                        text=f"⚠️ Unfinished upload detected: '{fname}' ({done}/{state.total} caches processed)."
+                    )
+                    self.frame_resume_coords.pack(fill="x", pady=6, padx=6, before=self.coords_opt_frame)
+            else:
+                self.frame_resume_coords.pack_forget()
+
+        # 2. Bulk logging run checkpoint
+        if hasattr(self, "frame_resume_logging"):
+            if self.checkpoint_mgr.has_active_logging_run() and not self.is_running:
+                log_state = self.checkpoint_mgr.load_active_logging_run()
+                if log_state:
+                    done = len(log_state.completed_gccodes)
+                    self.lbl_resume_logging_info.configure(
+                        text=f"⚠️ Unfinished bulk logging detected: {done}/{log_state.total} caches logged ({log_state.log_type_key})."
+                    )
+                    self.frame_resume_logging.pack(fill="x", pady=6, padx=6, before=self.btn_log_start.master)
+            else:
+                self.frame_resume_logging.pack_forget()
 
     def _on_resume_coords_clicked(self):
         state = self.checkpoint_mgr.load_active_coords_run()
@@ -1394,6 +1518,40 @@ class UltimateApp:
             self.frame_resume_coords.pack_forget()
             self.log("Discarded unfinished upload checkpoint.", "info")
 
+    def _on_resume_logging_clicked(self):
+        state = self.checkpoint_mgr.load_active_logging_run()
+        if not state:
+            self.frame_resume_logging.pack_forget()
+            return
+
+        self.txt_gc_codes.delete("1.0", "end")
+        self.txt_gc_codes.insert("1.0", " ".join(state.all_gccodes))
+        if state.date_str:
+            self.entry_date.delete(0, "end")
+            self.entry_date.insert(0, state.date_str)
+        if state.log_text:
+            self.txt_log_message.delete("1.0", "end")
+            self.txt_log_message.insert("1.0", state.log_text)
+        if state.log_type_key in LOG_TYPE_NAMES:
+            self.combo_log_type.set(LOG_TYPE_NAMES[state.log_type_key])
+
+        saved_logs = self.checkpoint_mgr.read_saved_logging_logs(25)
+        if saved_logs:
+            self.log("--- Restoring recent log from previous interrupted run ---", "info")
+            for line in saved_logs:
+                self.txt_console.insert("end", f"{line}\n")
+            self.txt_console.see("end")
+
+        done_count = len(state.completed_gccodes)
+        self.log(f"Resuming bulk logging from checkpoint: {done_count}/{state.total} caches already completed.", "info")
+        self._start_bulk_logging(resume=True)
+
+    def _on_discard_logging_clicked(self):
+        if messagebox.askyesno("Discard checkpoint", "Discard progress from the unfinished bulk logging?", parent=self.root):
+            self.checkpoint_mgr.discard_logging_run()
+            self.frame_resume_logging.pack_forget()
+            self.log("Discarded unfinished bulk logging checkpoint.", "info")
+
     def _start_coords_upload(self, resume: bool = False):
         if not self.loaded_waypoints:
             messagebox.showwarning("Upload", "No waypoints loaded. Choose a GPX file first.", parent=self.root)
@@ -1419,6 +1577,7 @@ class UltimateApp:
 
         def worker():
             try:
+                f_cfg = self.config.filters
                 res = uploader.run(
                     self.loaded_waypoints,
                     mode=mode,
@@ -1426,7 +1585,10 @@ class UltimateApp:
                     on_log=self.log,
                     source_file_path=source_path,
                     resume=resume,
-                    omit_virtual_and_earth=self.config.filters.omit_virtual_earth_webcam
+                    omit_virtual=f_cfg.omit_virtual,
+                    omit_earth=f_cfg.omit_earth,
+                    omit_events=f_cfg.omit_events,
+                    omit_webcam=f_cfg.omit_webcam
                 )
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Coordinates upload", res))
@@ -1449,23 +1611,42 @@ class UltimateApp:
         self.txt_log_message.insert("1.0", val)
 
     def _import_codes_from_file(self):
-        f = filedialog.askopenfilename(filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("Text files", "*.txt"), ("All files", "*.*")])
-        if f:
-            items = parse_file(f)
-            if self.config.filters.omit_virtual_earth_webcam:
+        initial_dir = getattr(self.config, "last_browse_dir", None) or os.path.expanduser("~")
+        files = filedialog.askopenfilenames(
+            initialdir=initial_dir,
+            filetypes=[("GPX & LOC files", "*.gpx *.loc"), ("Text files", "*.txt"), ("All files", "*.*")],
+            parent=self.root
+        )
+        if files:
+            self.config.last_browse_dir = os.path.dirname(files[0])
+            self.config_mgr.save()
+            all_codes = []
+            total_omitted = 0
+            f_cfg = self.config.filters
+            for f in files:
+                items = parse_file(f)
                 orig_c = len(items)
-                items = [it for it in items if not is_virtual_or_earth(it.cache_type)]
-                omitted = orig_c - len(items)
-                omitted_msg = f" ({omitted} virtual/earth/webcam omitted by filter)" if omitted else ""
-            else:
-                omitted_msg = ""
+                if f_cfg.omit_virtual or f_cfg.omit_earth or f_cfg.omit_events or f_cfg.omit_webcam:
+                    items = [
+                        it for it in items
+                        if not is_cache_filtered(
+                            it.cache_type,
+                            omit_virtual=f_cfg.omit_virtual,
+                            omit_earth=f_cfg.omit_earth,
+                            omit_events=f_cfg.omit_events,
+                            omit_webcam=f_cfg.omit_webcam
+                        )
+                    ]
+                    total_omitted += (orig_c - len(items))
+                codes = [it.gccode for it in items if it.gccode]
+                all_codes.extend(codes)
 
-            codes = [it.gccode for it in items]
-            if codes:
-                self.txt_gc_codes.insert("end", " ".join(codes) + "\n")
-                self.log(f"Imported {len(codes)} GC codes from {os.path.basename(f)}{omitted_msg}.", "info")
+            if all_codes:
+                self.txt_gc_codes.insert("end", " ".join(all_codes) + "\n")
+                omitted_msg = f" ({total_omitted} omitted by filter)" if total_omitted else ""
+                self.log(f"Imported {len(all_codes)} GC codes from {len(files)} file(s){omitted_msg}.", "info")
 
-    def _start_bulk_logging(self):
+    def _start_bulk_logging(self, resume: bool = False):
         raw_text = self.txt_gc_codes.get("1.0", "end").strip()
         codes = extract_gc_codes_from_string(raw_text)
         if not codes:
@@ -1576,8 +1757,13 @@ class UltimateApp:
         date_str = self._parse_to_iso_date(self.entry_date.get())
         log_text = self.txt_log_message.get("1.0", "end").strip()
 
+        if hasattr(self, "frame_resume_logging"):
+            self.frame_resume_logging.pack_forget()
+
         self.is_running = True
         self.btn_log_start.configure(state="disabled")
+        self.btn_log_pause.configure(state="normal", text="⏸ Pause")
+        self.btn_log_stop.configure(state="normal")
         self.progress_bar.set(0)
 
         logger = CacheLogger(self.client, self.safety)
@@ -1587,14 +1773,22 @@ class UltimateApp:
 
         def worker():
             try:
+                f_cfg = self.config.filters
+                skip_already_found = self.var_skip_already_found.get() if hasattr(self, "var_skip_already_found") else False
                 res = logger.run_log(
                     codes,
                     log_type_key=type_key,
                     date_str=date_str,
                     log_text=log_text,
+                    skip_already_found=skip_already_found,
+                    omit_virtual=f_cfg.omit_virtual,
+                    omit_earth=f_cfg.omit_earth,
+                    omit_events=f_cfg.omit_events,
+                    omit_webcam=f_cfg.omit_webcam,
+                    checkpoint_manager=self.checkpoint_mgr,
+                    resume=resume,
                     on_progress=on_progress,
-                    on_log=self.log,
-                    omit_virtual_and_earth=self.config.filters.omit_virtual_earth_webcam
+                    on_log=self.log
                 )
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Bulk logging", res))
@@ -1604,6 +1798,7 @@ class UltimateApp:
                 self.root.after(0, lambda: self._on_operation_error("Bulk logging", str(e)))
             finally:
                 self.root.after(0, self._reset_controls)
+                self.root.after(0, self._check_active_checkpoint)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1634,12 +1829,20 @@ class UltimateApp:
 
         def worker():
             copier = UserLogCopier(self.client, self.safety)
+            f_cfg = self.config.filters
+            active_user = self.client.logged_in_username or self.client.get_current_username()
             codes = copier.fetch_user_logged_caches(
                 target_user,
                 target_pwd,
                 target_date,
                 on_log=self.log,
-                end_date_str=end_date
+                end_date_str=end_date,
+                omit_virtual=f_cfg.omit_virtual,
+                omit_earth=f_cfg.omit_earth,
+                omit_events=f_cfg.omit_events,
+                omit_webcam=f_cfg.omit_webcam,
+                deduplicate_active_user=True,
+                active_username=active_user
             )
             if codes:
                 self.root.after(0, lambda: self._insert_copied_codes(codes))
@@ -1825,6 +2028,29 @@ class UltimateApp:
                 self.root.after(0, lambda: self._on_operation_error("Un-ignore list", str(e)))
             finally:
                 self.root.after(0, self._reset_controls)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _fetch_ignored_caches(self):
+        if not self.client.ensure_valid_session():
+            messagebox.showwarning("Session invalid", "Please log in first to fetch ignored caches.", parent=self.root)
+            return
+
+        self.log("Fetching ignored cache list from Geocaching.com...", "info")
+
+        def worker():
+            try:
+                codes = self.client.get_ignored_cache_codes()
+                if codes:
+                    def update_ui():
+                        self.txt_ignore_codes.delete("1.0", "end")
+                        self.txt_ignore_codes.insert("1.0", " ".join(sorted(codes)))
+                        self.log(f"Loaded {len(codes)} ignored cache(s) into editor.", "success")
+                    self.root.after(0, update_ui)
+                else:
+                    self.root.after(0, lambda: self.log("No ignored caches found on your account.", "warning"))
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"Error fetching ignored caches: {e}", "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2120,11 +2346,22 @@ class UltimateApp:
                 self._update_combo_template_values()
                 self.log(f"Removed template #{index + 1}.", "info")
 
-    def _on_toggle_omit_virtual_earth(self):
-        self.config.filters.omit_virtual_earth_webcam = self.var_omit_virtual_earth.get()
+    def _on_toggle_filters(self):
+        self.config.filters.omit_virtual = self.var_omit_virtual.get()
+        self.config.filters.omit_earthcache = self.var_omit_earth.get()
+        self.config.filters.omit_events = self.var_omit_events.get()
+        self.config.filters.omit_webcam = self.var_omit_webcam.get()
         self.config_mgr.save()
-        status = "enabled" if self.config.filters.omit_virtual_earth_webcam else "disabled"
-        self.log(f"Filter 'Omit virtual, earth, and webcam caches' {status}.", "info")
+        self.log(
+            f"Filters updated: Virtual={self.config.filters.omit_virtual}, "
+            f"Earth={self.config.filters.omit_earthcache}, "
+            f"Events={self.config.filters.omit_events}, "
+            f"Webcam={self.config.filters.omit_webcam}.",
+            "info"
+        )
+
+    def _on_toggle_omit_virtual_earth(self):
+        self._on_toggle_filters()
 
     def _on_set_safety_defaults(self):
         self.entry_min_delay.delete(0, "end")
@@ -2201,11 +2438,17 @@ class UltimateApp:
     def _toggle_pause(self):
         if self.safety.is_paused:
             self.safety.resume()
-            self.btn_coords_pause.configure(text="⏸ Pause")
+            if hasattr(self, "btn_coords_pause"):
+                self.btn_coords_pause.configure(text="⏸ Pause")
+            if hasattr(self, "btn_log_pause"):
+                self.btn_log_pause.configure(text="⏸ Pause")
             self.log("Operation resumed.", "info")
         else:
             self.safety.pause()
-            self.btn_coords_pause.configure(text="▶ Resume")
+            if hasattr(self, "btn_coords_pause"):
+                self.btn_coords_pause.configure(text="▶ Resume")
+            if hasattr(self, "btn_log_pause"):
+                self.btn_log_pause.configure(text="▶ Resume")
             self.log("Operation paused by user.", "warning")
 
     def _stop_operation(self):
@@ -2323,6 +2566,10 @@ class UltimateApp:
             self.btn_coords_stop.configure(state="disabled")
         if hasattr(self, "btn_log_start"):
             self.btn_log_start.configure(state="normal")
+        if hasattr(self, "btn_log_pause"):
+            self.btn_log_pause.configure(state="disabled", text="⏸ Pause")
+        if hasattr(self, "btn_log_stop"):
+            self.btn_log_stop.configure(state="disabled")
         if hasattr(self, "lbl_eta"):
             self.lbl_eta.configure(text="ETA: --:--")
 

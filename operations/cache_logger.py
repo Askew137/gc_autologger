@@ -6,7 +6,7 @@ Uses direct tRPC batch communication with safety pacing and live progress report
 
 import time
 from datetime import datetime
-from typing import List, Callable, Optional, Dict, Any
+from typing import List, Callable, Optional, Dict, Any, Set
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 
@@ -41,8 +41,14 @@ class CacheLogger:
         log_type_key: str,
         date_str: str,
         log_text: str = "",
-        skip_already_found: bool = True,
+        skip_already_found: bool = False,
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False,
         omit_virtual_and_earth: bool = False,
+        checkpoint_manager: Optional[Any] = None,
+        resume: bool = False,
         on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None
     ) -> Dict[str, Any]:
@@ -52,7 +58,9 @@ class CacheLogger:
         :param log_type_key: 'FOUND', 'DNF', 'NOTE', 'NEEDS_OWNER_ATTENTION', 'NEEDS_REVIEWER_ATTENTION'
         :param date_str: Date string 'YYYY-MM-DD'
         :param log_text: Text content of the log
-        :param skip_already_found: If True and log_type is 'Found it', skips caches already found
+        :param skip_already_found: If True and log_type is 'Found it', checks Groundspeak for duplicates
+        :param checkpoint_manager: Optional RunCheckpointManager instance for crash recovery
+        :param resume: If True, resumes previous incomplete run by skipping completed codes
         """
         self.safety.reset()
         total = len(gc_codes)
@@ -68,6 +76,17 @@ class CacheLogger:
                 on_log(msg, level)
             else:
                 print(f"[{level.upper()}] {msg}")
+
+        # Checkpoint initialization
+        completed_codes: Set[str] = set()
+        if checkpoint_manager:
+            if resume:
+                state = checkpoint_manager.load_active_logging_run()
+                if state:
+                    completed_codes = set(state.completed_gccodes)
+                    log(f"Resuming run from checkpoint: {len(completed_codes)}/{total} already finished.", "info")
+            else:
+                checkpoint_manager.start_logging_run(log_type_key, date_str, log_text, gc_codes)
 
         # Format date as ISO string (e.g. "2026-10-06T12:00:00.000Z")
         iso_date = f"{date_str}T12:00:00.000Z"
@@ -87,26 +106,47 @@ class CacheLogger:
                 break
 
             item_start = time.time()
-            prefix = f"[{idx}/{total}] {gc_code}"
             clean_code = gc_code.strip().upper()
+            prefix = f"[{idx}/{total}] {clean_code}"
 
-            # Check if cache is already found when logging as "Found it"
+            # Check if already processed in earlier run
+            if clean_code in completed_codes:
+                success_count += 1
+                log(f"{prefix} ⏭️ Already processed in earlier run (checkpoint skip)", "info")
+                percent = (idx / total) * 100
+                if on_progress:
+                    on_progress(idx, total, percent, None, clean_code)
+                continue
+
+            # Check cache type filtering
+            should_filter = (omit_virtual or omit_earth or omit_events or omit_webcam or omit_virtual_and_earth)
+            if should_filter and self.client.is_cache_filtered(
+                clean_code,
+                omit_virtual=omit_virtual or omit_virtual_and_earth,
+                omit_earth=omit_earth or omit_virtual_and_earth,
+                omit_events=omit_events,
+                omit_webcam=omit_webcam
+            ):
+                success_count += 1
+                log(f"{prefix} ⏭️ Skipped: Cache type filtered out", "info")
+                if checkpoint_manager:
+                    checkpoint_manager.record_log_item(clean_code, success=True, reason="Filtered out")
+                    checkpoint_manager.append_logging_log(f"{clean_code} - Skipped: Cache type filtered out")
+                percent = (idx / total) * 100
+                if on_progress:
+                    on_progress(idx, total, percent, None, clean_code)
+                continue
+
+            # Check if cache is already found when logging as "Found it" and user requested duplicate check
             if log_type_id == 2 and skip_already_found:
                 is_found, found_date = self.client.is_cache_found(clean_code)
                 if is_found:
                     success_count += 1
                     date_info = f" on {found_date}" if found_date else ""
                     log(f"{prefix} ⏭️ Already found{date_info} (skipped duplicate)", "info")
-                    percent = (idx / total) * 100
-                    if on_progress:
-                        on_progress(idx, total, percent, None, clean_code)
-                    continue
-
-            # Check if Virtual or EarthCache should be omitted
-            if omit_virtual_and_earth:
-                if self.client.is_virtual_or_earth_cache(clean_code):
-                    success_count += 1
-                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache / Webcam filtered out", "info")
+                    if checkpoint_manager:
+                        checkpoint_manager.record_log_item(clean_code, success=True, reason=f"Already found{date_info}")
+                        checkpoint_manager.append_logging_log(f"{clean_code} - Already found{date_info}")
                     percent = (idx / total) * 100
                     if on_progress:
                         on_progress(idx, total, percent, None, clean_code)
@@ -117,10 +157,16 @@ class CacheLogger:
             if success:
                 success_count += 1
                 log(f"{prefix} ✅ Logged as {display_type}", "success")
+                if checkpoint_manager:
+                    checkpoint_manager.record_log_item(clean_code, success=True)
+                    checkpoint_manager.append_logging_log(f"{clean_code} - Logged as {display_type}")
             else:
                 failed_count += 1
-                failed_items.append({"gccode": gc_code, "reason": message})
+                failed_items.append({"gccode": clean_code, "reason": message})
                 log(f"{prefix} ❌ Failed: {message}", "error")
+                if checkpoint_manager:
+                    checkpoint_manager.record_log_item(clean_code, success=False, reason=message)
+                    checkpoint_manager.append_logging_log(f"{clean_code} - Failed: {message}")
 
             elapsed_item = time.time() - item_start
             processed_times.append(elapsed_item)
@@ -130,7 +176,7 @@ class CacheLogger:
 
             percent = (idx / total) * 100
             if on_progress:
-                on_progress(idx, total, percent, eta, gc_code)
+                on_progress(idx, total, percent, eta, clean_code)
 
             if idx < total:
                 if not self.safety.wait_before_next(idx, total, log_callback=lambda m: log(m, "info")):
@@ -138,6 +184,11 @@ class CacheLogger:
                     break
 
         total_elapsed = time.time() - start_time
+        if checkpoint_manager:
+            if self.safety.is_cancelled:
+                checkpoint_manager.finish_logging_run("cancelled")
+            else:
+                checkpoint_manager.finish_logging_run("completed")
         summary = {
             "total": total,
             "success": success_count,

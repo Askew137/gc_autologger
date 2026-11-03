@@ -53,7 +53,21 @@ class SafetyConfig:
 
 @dataclass
 class FilterConfig:
-    omit_virtual_earth_webcam: bool = False
+    omit_virtual: bool = False
+    omit_earthcache: bool = False
+    omit_events: bool = False
+    omit_webcam: bool = False
+
+    @property
+    def omit_virtual_earth_webcam(self) -> bool:
+        """Backwards compatibility property."""
+        return self.omit_virtual and self.omit_earthcache and self.omit_webcam
+
+    @omit_virtual_earth_webcam.setter
+    def omit_virtual_earth_webcam(self, val: bool) -> None:
+        self.omit_virtual = val
+        self.omit_earthcache = val
+        self.omit_webcam = val
 
 
 @dataclass
@@ -220,9 +234,17 @@ class ConfigManager:
 
         # Filters
         raw_filters = data.get("filters", {})
-        val = raw_filters.get("omit_virtual_earth_webcam", raw_filters.get("omit_virtual_and_earth", False))
+        legacy_val = raw_filters.get("omit_virtual_earth_webcam", raw_filters.get("omit_virtual_and_earth", False))
+        omit_v = bool(raw_filters.get("omit_virtual", legacy_val))
+        omit_ec = bool(raw_filters.get("omit_earthcache", legacy_val))
+        omit_ev = bool(raw_filters.get("omit_events", False))
+        omit_wc = bool(raw_filters.get("omit_webcam", legacy_val))
+
         filters = FilterConfig(
-            omit_virtual_earth_webcam=bool(val)
+            omit_virtual=omit_v,
+            omit_earthcache=omit_ec,
+            omit_events=omit_ev,
+            omit_webcam=omit_wc
         )
 
         # GUI

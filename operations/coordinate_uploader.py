@@ -8,7 +8,7 @@ Provides progress reporting, live ETA calculation, and safety pacing.
 
 import time
 from typing import List, Callable, Optional, Dict, Any
-from core.gpx_parser import WaypointItem, is_virtual_or_earth
+from core.gpx_parser import WaypointItem, is_virtual_or_earth, is_cache_filtered
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
@@ -38,6 +38,10 @@ class CoordinateUploader:
         on_log: Optional[Callable[[str, str], None]] = None,
         source_file_path: str = "",
         resume: bool = False,
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False,
         omit_virtual_and_earth: bool = False
     ) -> Dict[str, Any]:
         """
@@ -127,16 +131,20 @@ class CoordinateUploader:
                     on_progress(idx, total, percent, None, item)
                 continue
 
-            # Omit virtual and earth caches filter
-            if omit_virtual_and_earth:
-                is_voe = False
-                if is_virtual_or_earth(item.cache_type):
-                    is_voe = True
-                elif not item.cache_type:
-                    is_voe = self.client.is_virtual_or_earth_cache(item.gccode)
+            # Granular cache type filter
+            should_filter = (omit_virtual or omit_earth or omit_events or omit_webcam or omit_virtual_and_earth)
+            if should_filter:
+                ov = omit_virtual or omit_virtual_and_earth
+                oe = omit_earth or omit_virtual_and_earth
+                oev = omit_events
+                ow = omit_webcam or omit_virtual_and_earth
+                if item.cache_type:
+                    is_filtered = is_cache_filtered(item.cache_type, omit_virtual=ov, omit_earth=oe, omit_events=oev, omit_webcam=ow)
+                else:
+                    is_filtered = self.client.is_cache_filtered(item.gccode, omit_virtual=ov, omit_earth=oe, omit_events=oev, omit_webcam=ow)
 
-                if is_voe:
-                    log(f"{prefix} ⏭️ Skipped: Virtual / EarthCache / Webcam filtered out.", "info")
+                if is_filtered:
+                    log(f"{prefix} ⏭️ Skipped: Cache type filtered out.", "info")
                     skipped_count += 1
                     if self.checkpoint_manager:
                         self.checkpoint_manager.record_coord_item(item.gccode, success=True)

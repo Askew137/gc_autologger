@@ -882,20 +882,142 @@ class GeocachingClient:
                 return True, str(found_dt).split("T")[0]
         return False, None
 
-    def is_virtual_or_earth_cache(self, gc_code: str) -> bool:
-        """
-        Check if cache is a Virtual Cache (type 4), Webcam Cache (type 11), or EarthCache (type 137).
-        """
+    def is_virtual_cache(self, gc_code: str) -> bool:
+        """Check if cache is a Virtual Cache (type 4) or Locationless (type 12)."""
         data = self.get_cache_details(gc_code)
         if not data:
             return False
         type_id = data.get("geocacheType")
         type_name = str(data.get("typeName", "")).lower()
-        if type_id in [4, 11, 137]:
-            return True
-        if any(k in type_name for k in ["virtual", "earthcache", "earth cache", "webcam"]):
+        if type_id in [4, 12] or "virtual" in type_name or "locationless" in type_name:
             return True
         return False
+
+    def is_earth_cache(self, gc_code: str) -> bool:
+        """Check if cache is an EarthCache (type 137)."""
+        data = self.get_cache_details(gc_code)
+        if not data:
+            return False
+        type_id = data.get("geocacheType")
+        type_name = str(data.get("typeName", "")).lower()
+        if type_id == 137 or "earthcache" in type_name or "earth cache" in type_name:
+            return True
+        return False
+
+    def is_event_cache(self, gc_code: str) -> bool:
+        """Check if cache is any event type (Event, Mega, Giga, CITO, Celebration, Block Party, Maze)."""
+        data = self.get_cache_details(gc_code)
+        if not data:
+            return False
+        type_id = data.get("geocacheType")
+        type_name = str(data.get("typeName", "")).lower()
+        if type_id in [6, 13, 453, 7005, 3653, 3774, 4738, 1304]:
+            return True
+        event_keywords = ["event", "cito", "celebration", "block party", "gps exhibit", "gps adventure"]
+        return any(k in type_name for k in event_keywords)
+
+    def is_webcam_cache(self, gc_code: str) -> bool:
+        """Check if cache is a Webcam Cache (type 11)."""
+        data = self.get_cache_details(gc_code)
+        if not data:
+            return False
+        type_id = data.get("geocacheType")
+        type_name = str(data.get("typeName", "")).lower()
+        if type_id == 11 or "webcam" in type_name:
+            return True
+        return False
+
+    def is_cache_filtered(
+        self,
+        gc_code: str,
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False
+    ) -> bool:
+        """Check if cache matches any of the enabled omit filters."""
+        if not (omit_virtual or omit_earth or omit_events or omit_webcam):
+            return False
+        data = self.get_cache_details(gc_code)
+        if not data:
+            return False
+        type_id = data.get("geocacheType")
+        type_name = str(data.get("typeName", "")).lower()
+
+        if omit_virtual and (type_id in [4, 12] or "virtual" in type_name or "locationless" in type_name):
+            return True
+        if omit_earth and (type_id == 137 or "earthcache" in type_name or "earth cache" in type_name):
+            return True
+        if omit_events and (type_id in [6, 13, 453, 7005, 3653, 3774, 4738, 1304] or any(k in type_name for k in ["event", "cito", "celebration", "block party"])):
+            return True
+        if omit_webcam and (type_id == 11 or "webcam" in type_name):
+            return True
+        return False
+
+    def is_virtual_or_earth_cache(self, gc_code: str) -> bool:
+        """
+        Check if cache is a Virtual Cache (type 4), Webcam Cache (type 11), or EarthCache (type 137) (legacy helper).
+        """
+        return self.is_virtual_cache(gc_code) or self.is_earth_cache(gc_code) or self.is_webcam_cache(gc_code)
+
+    def get_user_logs_for_date(self, username: str, start_iso: str, end_iso: Optional[str] = None) -> Set[str]:
+        """Fetch all GC codes logged as found by username on specific date or date range."""
+        if not end_iso:
+            end_iso = start_iso
+        s_iso = min(start_iso, end_iso)
+        e_iso = max(start_iso, end_iso)
+        try:
+            url = f"{self.API_PROXY_URL}/web/search/v2"
+            bearer = self.get_oauth_bearer_token()
+            headers = {"Accept": "application/json"}
+            if bearer:
+                headers["Authorization"] = f"Bearer {bearer}"
+
+            skip = 0
+            take = 200
+            codes: Set[str] = set()
+            max_pages = 25
+
+            for _ in range(max_pages):
+                params = {
+                    "fb": username,
+                    "sort": "foundDate",
+                    "asc": "false",
+                    "sa": "1",
+                    "skip": str(skip),
+                    "take": str(take),
+                    "app": "cgeo"
+                }
+                resp = self.session.get(url, headers=headers, params=params, timeout=12)
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                results = data.get("results", [])
+                if not results:
+                    break
+
+                passed_target = False
+                for item in results:
+                    lfd = item.get("lastFoundDate")
+                    if lfd:
+                        date_part = lfd.split("T")[0]
+                        if s_iso <= date_part <= e_iso:
+                            c = item.get("code")
+                            if c:
+                                codes.add(c.upper())
+                        elif date_part < s_iso:
+                            passed_target = True
+                            break
+
+                if passed_target:
+                    break
+
+                skip += take
+
+            return codes
+        except Exception:
+            pass
+        return set()
 
     def get_ignored_cache_codes(self) -> set:
         """

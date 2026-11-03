@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Callable, Optional, Dict, Any, Set
 from core.client import GeocachingClient
+from core.gpx_parser import is_cache_filtered
 from core.safety import SafetyManager
 
 
@@ -25,11 +26,18 @@ class UserLogCopier:
         target_password: Optional[str],
         target_date_str: str,
         on_log: Optional[Callable[[str, str], None]] = None,
-        end_date_str: Optional[str] = None
+        end_date_str: Optional[str] = None,
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False,
+        deduplicate_active_user: bool = True,
+        active_username: Optional[str] = None
     ) -> List[str]:
         """
         Fetch all GC codes logged by target user on the specified date or date range (inclusive).
         If target_password is provided, uses direct HTTP session or browser session.
+        Applies cache type filters and smart deduplication against active user account.
         """
         def log(msg: str, level: str = "info"):
             if on_log:
@@ -87,18 +95,43 @@ class UserLogCopier:
         else:
             log(f"Scanning logs for user '{target_username}' on {start_iso}...", "info")
 
+        gc_codes: Optional[List[str]] = None
         # If password is provided, try direct HTTP first, then fallback to Playwright
         if target_password:
             http_result = self._fetch_via_authenticated_http(
-                target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log
+                target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log,
+                omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
             )
             if http_result is not None:
-                return http_result
-            return self._fetch_via_browser(
-                target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log
-            )
+                gc_codes = http_result
+            else:
+                gc_codes = self._fetch_via_browser(
+                    target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log,
+                    omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
+                )
         else:
-            return self._fetch_via_public_api(target_username, start_iso, end_iso, log)
+            gc_codes = self._fetch_via_public_api(
+                target_username, start_iso, end_iso, log,
+                omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
+            )
+
+        if not gc_codes:
+            return []
+
+        # Deduplication against active user's own finds for the date range
+        if deduplicate_active_user:
+            active_user = active_username or self.client.logged_in_username or self.client.get_current_username()
+            if active_user and active_user.strip().lower() != target_username.strip().lower():
+                log(f"Checking existing finds for active user '{active_user}' to prevent duplicates...", "info")
+                active_logs = self.client.get_user_logs_for_date(active_user, start_iso, end_iso)
+                if active_logs:
+                    init_cnt = len(gc_codes)
+                    gc_codes = [c for c in gc_codes if c not in active_logs]
+                    skipped = init_cnt - len(gc_codes)
+                    if skipped > 0:
+                        log(f"Smart deduplication: removed {skipped} cache(s) already logged by '{active_user}' on {start_iso if start_iso == end_iso else f'{start_iso} to {end_iso}'}.", "info")
+
+        return gc_codes
 
     def _fetch_via_authenticated_http(
         self,
@@ -108,7 +141,11 @@ class UserLogCopier:
         end_iso: str,
         all_iso_dates: Set[str],
         possible_date_formats: List[str],
-        log: Callable[[str, str], None]
+        log: Callable[[str, str], None],
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False,
     ) -> Optional[List[str]]:
         """Fast direct HTTP log reader using target user's session."""
         try:
@@ -132,6 +169,26 @@ class UserLogCopier:
                     gc_match = re.search(r'/geocache/(GC[A-Z0-9]+)', tds[3], re.IGNORECASE)
                     if gc_match:
                         gc = gc_match.group(1).upper()
+
+                        # Cache type filtering
+                        cache_type_val = None
+                        wpt_m = re.search(r'/wpttypes/(?:png/)?(\d+)\.', tds[1])
+                        if wpt_m:
+                            cache_type_val = int(wpt_m.group(1))
+                        else:
+                            alt_m = re.search(r'(?:alt|title)=["\']([^"\']+)["\']', tds[1])
+                            if alt_m:
+                                cache_type_val = alt_m.group(1)
+
+                        if cache_type_val and is_cache_filtered(
+                            cache_type_val,
+                            omit_virtual=omit_virtual,
+                            omit_earth=omit_earth,
+                            omit_events=omit_events,
+                            omit_webcam=omit_webcam
+                        ):
+                            continue
+
                         parts = [int(p) for p in re.findall(r'\d+', date_text)]
                         row_iso = None
                         if len(parts) == 3:
@@ -172,7 +229,11 @@ class UserLogCopier:
         end_iso: str,
         all_iso_dates: Set[str],
         possible_date_formats: List[str],
-        log: Callable[[str, str], None]
+        log: Callable[[str, str], None],
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False,
     ) -> List[str]:
         """Fetch logs by logging in and scrolling /my/logs.aspx using Playwright."""
         try:
@@ -259,10 +320,15 @@ class UserLogCopier:
                             if(tds.length >= 4) {
                                 let dateText = tds[2].innerText.trim();
                                 let cacheLink = tds[3].querySelector('a[href*="/geocache/"]');
+                                let typeImg = tds[1].querySelector('img');
+                                let typeInfo = "";
+                                if (typeImg) {
+                                    typeInfo = typeImg.getAttribute("title") || typeImg.getAttribute("alt") || typeImg.getAttribute("src") || "";
+                                }
                                 if(cacheLink) {
                                     let m = cacheLink.getAttribute("href").match(/\/geocache\/(GC[A-Z0-9]+)/i);
                                     if(m) {
-                                        data.push({dateText: dateText, gccode: m[1].toUpperCase()});
+                                        data.push({dateText: dateText, gccode: m[1].toUpperCase(), typeInfo: typeInfo});
                                     }
                                 }
                             }
@@ -273,6 +339,13 @@ class UserLogCopier:
                     current_matches = set()
                     earliest_seen_iso = None
                     for r in rows_data:
+                        # Check filter
+                        t_info = r.get('typeInfo', '')
+                        wpt_m = re.search(r'/wpttypes/(?:png/)?(\d+)\.', t_info)
+                        c_type = int(wpt_m.group(1)) if wpt_m else t_info
+                        if is_cache_filtered(c_type, omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam):
+                            continue
+
                         d_text = r['dateText']
                         is_match = False
                         row_iso = None
@@ -330,7 +403,11 @@ class UserLogCopier:
         username: str,
         start_iso: str,
         end_iso: str,
-        log: Callable[[str, str], None]
+        log: Callable[[str, str], None],
+        omit_virtual: bool = False,
+        omit_earth: bool = False,
+        omit_events: bool = False,
+        omit_webcam: bool = False,
     ) -> List[str]:
         """Fetch logs for target user on specific date or date range using Geocaching search API."""
         try:
@@ -377,6 +454,9 @@ class UserLogCopier:
                     date_part = lfd.split("T")[0]
                     code = item.get("code")
                     if start_iso <= date_part <= end_iso:
+                        ctype = item.get("geocacheType")
+                        if is_cache_filtered(ctype, omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam):
+                            continue
                         if code and code not in matched_codes:
                             matched_codes.append(code)
                     elif date_part < start_iso:
