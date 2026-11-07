@@ -804,54 +804,95 @@ class UltimateApp:
         scroll = ctk.CTkScrollableFrame(self.tab_settings)
         scroll.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # Smooth macOS & Tk 9.1 trackpad / mouse wheel scroll support
-        def _is_mouse_over_settings():
+        # Configure 1 unit = 1 pixel for smooth trackpad scrolling
+        scroll._parent_canvas.configure(yscrollincrement=1)
+        # Suppress CustomTkinter's default scroll handler to avoid conflicts
+        scroll._check_if_valid_scroll = lambda w: False
+
+        def _can_scroll_settings(event):
             try:
-                if hasattr(self, "tabview") and self.tabview.get() != "⚙️ Config & Accounts":
+                if self.root.grab_current() is not None:
                     return False
-                x = self.root.winfo_pointerx()
-                y = self.root.winfo_pointery()
-                frame = scroll._parent_frame
-                fx = frame.winfo_rootx()
-                fy = frame.winfo_rooty()
-                fw = frame.winfo_width()
-                fh = frame.winfo_height()
-                return (fx <= x <= fx + fw) and (fy <= y <= fy + fh)
+                if hasattr(self, "tabview"):
+                    cur_tab = str(self.tabview.get()).lower()
+                    if "config" not in cur_tab and "account" not in cur_tab:
+                        return False
+                w = getattr(event, "widget", None)
+                if w is not None and hasattr(self, "txt_console"):
+                    console_box = getattr(self.txt_console, "_textbox", self.txt_console)
+                    if str(w).startswith(str(console_box)):
+                        return False
+                return True
             except Exception:
                 return False
 
-        def _on_settings_wheel(event):
-            if not _is_mouse_over_settings():
+        def _on_touchpad_scroll(event):
+            if not _can_scroll_settings(event):
                 return
-            delta = 0
-            if hasattr(event, "delta") and event.delta != 0:
-                if sys.platform == "darwin":
-                    delta = int(-1 * event.delta)
-                    if delta == 0:
-                        delta = -1 if event.delta > 0 else 1
-                elif sys.platform.startswith("win"):
-                    delta = -int(event.delta / 60)
-                    if delta == 0:
-                        delta = -1 if event.delta > 0 else 1
-                else:
-                    delta = -1 if event.delta > 0 else 1
-            elif hasattr(event, "num"):
-                if event.num == 4:
-                    delta = -1
-                elif event.num == 5:
-                    delta = 1
+            raw_delta = getattr(event, "delta", 0)
+            if not raw_delta:
+                return
+            try:
+                raw = int(raw_delta) & 0xFFFFFFFF
+                delta_y = raw & 0xFFFF
+                if delta_y >= 0x8000:
+                    delta_y -= 0x10000
+                if delta_y != 0:
+                    scroll._parent_canvas.yview_scroll(-delta_y, "units")
+            except Exception:
+                pass
 
-            if delta != 0:
+        def _on_mouse_wheel(event):
+            if not _can_scroll_settings(event):
+                return
+            raw_delta = getattr(event, "delta", 0)
+            if not raw_delta:
+                return
+            try:
+                val = int(raw_delta)
+                # If delta is packed 32-bit (Tk 9 trackpad routed to mousewheel)
+                if abs(val) > 1000:
+                    raw = val & 0xFFFFFFFF
+                    delta_y = raw & 0xFFFF
+                    if delta_y >= 0x8000:
+                        delta_y -= 0x10000
+                    if delta_y != 0:
+                        scroll._parent_canvas.yview_scroll(-delta_y, "units")
+                    return
+
+                if sys.platform == "darwin":
+                    scroll_pixels = -int(val * 25)
+                elif sys.platform.startswith("win"):
+                    scroll_pixels = -int((val / 120) * 35)
+                else:
+                    scroll_pixels = -30 if val > 0 else 30
+
+                if scroll_pixels != 0:
+                    scroll._parent_canvas.yview_scroll(scroll_pixels, "units")
+            except Exception:
+                pass
+
+        def _on_btn4(event):
+            if _can_scroll_settings(event):
                 try:
-                    scroll._parent_canvas.yview_scroll(delta, "units")
+                    scroll._parent_canvas.yview_scroll(-30, "units")
                 except Exception:
                     pass
 
-        self.root.bind_all("<MouseWheel>", _on_settings_wheel, add=True)
+        def _on_btn5(event):
+            if _can_scroll_settings(event):
+                try:
+                    scroll._parent_canvas.yview_scroll(30, "units")
+                except Exception:
+                    pass
+
         try:
-            self.root.bind_all("<TouchpadScroll>", _on_settings_wheel, add=True)
+            self.root.bind_all("<TouchpadScroll>", _on_touchpad_scroll, add=True)
         except Exception:
             pass
+        self.root.bind_all("<MouseWheel>", _on_mouse_wheel, add=True)
+        self.root.bind_all("<Button-4>", _on_btn4, add=True)
+        self.root.bind_all("<Button-5>", _on_btn5, add=True)
 
         # 1. Accounts Section
         acc_sec = ctk.CTkFrame(scroll)
