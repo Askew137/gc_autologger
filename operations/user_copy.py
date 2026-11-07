@@ -30,14 +30,12 @@ class UserLogCopier:
         omit_virtual: bool = False,
         omit_earth: bool = False,
         omit_events: bool = False,
-        omit_webcam: bool = False,
-        deduplicate_active_user: bool = True,
-        active_username: Optional[str] = None
+        omit_webcam: bool = False
     ) -> List[str]:
         """
         Fetch all GC codes logged by target user on the specified date or date range (inclusive).
         If target_password is provided, uses direct HTTP session or browser session.
-        Applies cache type filters and smart deduplication against active user account.
+        Applies active cache type filters (Virtual, EarthCache, Events, Webcam).
         """
         def log(msg: str, level: str = "info"):
             if on_log:
@@ -115,23 +113,7 @@ class UserLogCopier:
                 omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
             )
 
-        if not gc_codes:
-            return []
-
-        # Deduplication against active user's own finds for the date range
-        if deduplicate_active_user:
-            active_user = active_username or self.client.logged_in_username or self.client.get_current_username()
-            if active_user and active_user.strip().lower() != target_username.strip().lower():
-                log(f"Checking existing finds for active user '{active_user}' to prevent duplicates...", "info")
-                active_logs = self.client.get_user_logs_for_date(active_user, start_iso, end_iso)
-                if active_logs:
-                    init_cnt = len(gc_codes)
-                    gc_codes = [c for c in gc_codes if c not in active_logs]
-                    skipped = init_cnt - len(gc_codes)
-                    if skipped > 0:
-                        log(f"Smart deduplication: removed {skipped} cache(s) already logged by '{active_user}' on {start_iso if start_iso == end_iso else f'{start_iso} to {end_iso}'}.", "info")
-
-        return gc_codes
+        return gc_codes or []
 
     def _fetch_via_authenticated_http(
         self,

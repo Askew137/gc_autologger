@@ -1830,7 +1830,6 @@ class UltimateApp:
         def worker():
             copier = UserLogCopier(self.client, self.safety)
             f_cfg = self.config.filters
-            active_user = self.client.logged_in_username or self.client.get_current_username()
             codes = copier.fetch_user_logged_caches(
                 target_user,
                 target_pwd,
@@ -1840,9 +1839,7 @@ class UltimateApp:
                 omit_virtual=f_cfg.omit_virtual,
                 omit_earth=f_cfg.omit_earth,
                 omit_events=f_cfg.omit_events,
-                omit_webcam=f_cfg.omit_webcam,
-                deduplicate_active_user=True,
-                active_username=active_user
+                omit_webcam=f_cfg.omit_webcam
             )
             if codes:
                 self.root.after(0, lambda: self._insert_copied_codes(codes))
