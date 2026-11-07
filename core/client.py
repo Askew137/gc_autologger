@@ -1213,3 +1213,154 @@ class GeocachingClient:
             return False, f"Un-ignore failed (HTTP {confirm_resp.status_code})"
         except Exception as e:
             return False, f"Error un-ignoring cache: {str(e)}"
+
+    @staticmethod
+    def extract_list_reference_code(url_or_code: str) -> Optional[str]:
+        """
+        Extract list reference code (e.g. 'BMDQMZP') from raw code or URL.
+        Examples:
+          - 'https://www.geocaching.com/plan/lists/BMDQMZP' -> 'BMDQMZP'
+          - 'https://geocaching.com/plan/lists/BMDQMZP/' -> 'BMDQMZP'
+          - 'BMDQMZP' -> 'BMDQMZP'
+        """
+        if not url_or_code:
+            return None
+        clean = url_or_code.strip()
+        match = re.search(r'(?:lists/|^)([A-Za-z0-9]+)(?:[/?#]|$)', clean)
+        if match:
+            return match.group(1).upper()
+        return None
+
+    def get_user_lists(self) -> List[Dict[str, Any]]:
+        """
+        Fetch all bookmark lists for the logged-in user.
+        Returns list of dicts: [{'referenceCode': str, 'name': str, 'count': int}, ...]
+        """
+        results: List[Dict[str, Any]] = []
+        bearer = self.get_oauth_bearer_token()
+        headers = {"Accept": "application/json"}
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        # 1. Try web proxy API
+        try:
+            url = f"{self.BASE_URL}/api/proxy/web/v1/lists?skip=0&take=100&type=bm"
+            resp = self.session.get(url, headers=headers, timeout=12)
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data if isinstance(data, list) else (data.get("data") or data.get("items") or [])
+                for it in items:
+                    ref = it.get("referenceCode") or it.get("id") or ""
+                    name = it.get("name") or it.get("title") or "Unnamed list"
+                    count = it.get("count") or it.get("itemCount") or it.get("totalItems") or 0
+                    if ref:
+                        results.append({
+                            "referenceCode": str(ref).upper(),
+                            "name": str(name),
+                            "count": int(count)
+                        })
+                if results:
+                    return results
+        except Exception:
+            pass
+
+        # 2. Fallback: parse /plan/lists __NEXT_DATA__
+        try:
+            resp = self.session.get(f"{self.BASE_URL}/plan/lists", timeout=12)
+            if resp.status_code == 200:
+                match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', resp.text)
+                if match:
+                    data = json.loads(match.group(1))
+                    page_props = data.get("props", {}).get("pageProps", {})
+                    raw_lists = page_props.get("lists") or page_props.get("userLists") or []
+                    if isinstance(raw_lists, dict):
+                        raw_lists = raw_lists.get("data") or raw_lists.get("items") or []
+                    for it in raw_lists:
+                        ref = it.get("referenceCode") or it.get("id") or ""
+                        name = it.get("name") or it.get("title") or "Unnamed list"
+                        count = it.get("count") or it.get("itemCount") or 0
+                        if ref:
+                            results.append({
+                                "referenceCode": str(ref).upper(),
+                                "name": str(name),
+                                "count": int(count)
+                            })
+        except Exception:
+            pass
+
+        return results
+
+    def get_list_geocaches(self, list_ref_or_url: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """
+        Fetch all geocaches in a list by its reference code or URL.
+        Returns (list_of_geocache_dicts, list_name), where each dict contains:
+        {'referenceCode': 'GC...', 'name': '...', 'geocacheType': ...}
+        """
+        ref_code = self.extract_list_reference_code(list_ref_or_url)
+        if not ref_code:
+            return [], None
+
+        bearer = self.get_oauth_bearer_token()
+        headers = {"Accept": "application/json"}
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        geocaches: List[Dict[str, Any]] = []
+        list_name: Optional[str] = None
+
+        # 1. Try web proxy API
+        try:
+            skip = 0
+            take = 500
+            while True:
+                url = f"{self.BASE_URL}/api/proxy/web/v1/lists/{ref_code}/geocaches?skip={skip}&take={take}"
+                resp = self.session.get(url, headers=headers, timeout=15)
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                items = data if isinstance(data, list) else (data.get("data") or data.get("items") or [])
+                if not items:
+                    break
+                for it in items:
+                    c_code = it.get("referenceCode") or it.get("gccode")
+                    if c_code:
+                        geocaches.append({
+                            "referenceCode": str(c_code).upper(),
+                            "name": it.get("name") or "",
+                            "geocacheType": it.get("geocacheType") or it.get("type") or ""
+                        })
+                total = data.get("total") if isinstance(data, dict) else len(items)
+                skip += take
+                if skip >= total or len(items) < take:
+                    break
+
+            if geocaches:
+                return geocaches, list_name
+        except Exception:
+            pass
+
+        # 2. Fallback: fetch HTML page /plan/lists/{ref_code} and parse __NEXT_DATA__
+        try:
+            resp = self.session.get(f"{self.BASE_URL}/plan/lists/{ref_code}", timeout=15)
+            if resp.status_code == 200:
+                match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', resp.text)
+                if match:
+                    data = json.loads(match.group(1))
+                    page_props = data.get("props", {}).get("pageProps", {})
+                    list_details = page_props.get("listDetails") or page_props.get("list") or {}
+                    if isinstance(list_details, dict):
+                        list_name = list_details.get("name") or list_details.get("title")
+                    raw_items = page_props.get("geocaches", {}).get("data", [])
+                    for it in raw_items:
+                        c_code = it.get("referenceCode") or it.get("gccode")
+                        if c_code:
+                            geocaches.append({
+                                "referenceCode": str(c_code).upper(),
+                                "name": it.get("name") or "",
+                                "geocacheType": it.get("geocacheType") or it.get("type") or ""
+                            })
+        except Exception:
+            pass
+
+        return geocaches, list_name
+

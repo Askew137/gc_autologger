@@ -414,7 +414,7 @@ class UltimateApp:
         )
         ctk.CTkLabel(
             self.frame_delete_info,
-            text="🗑️ Delete Mode:\nPermanently deletes your existing logs on Geocaching.com\nfor all listed GC codes.\n\nNo date, type, or log text input required.",
+            text="Delete Mode:\nPermanently deletes your existing logs on Geocaching.com\nfor all listed GC codes.\n\nNo date, type, or log text input required.",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#fca5a5",
             justify="left"
@@ -466,6 +466,7 @@ class UltimateApp:
         btn_row = ctk.CTkFrame(right_box, fg_color="transparent")
         btn_row.pack(fill="x", padx=10, pady=4)
         ctk.CTkButton(btn_row, text="Import from GPX", width=120, command=self._import_codes_from_file).pack(side="left", padx=4)
+        ctk.CTkButton(btn_row, text="Import from List", width=120, command=lambda: self._open_gc_list_import_dialog("bulk")).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Clear codes", width=90, fg_color=theme.CARD_BORDER, command=lambda: self.txt_gc_codes.delete("1.0", "end")).pack(side="left", padx=4)
 
         self.var_skip_already_found = ctk.BooleanVar(value=False)
@@ -495,7 +496,7 @@ class UltimateApp:
 
         self.btn_discard_logging_action = ctk.CTkButton(
             self.frame_resume_logging,
-            text="✕ Discard",
+            text="Discard",
             width=75,
             height=28,
             fg_color=theme.ACCENT_RED,
@@ -505,7 +506,7 @@ class UltimateApp:
 
         self.btn_resume_logging_action = ctk.CTkButton(
             self.frame_resume_logging,
-            text="▶ Resume logging",
+            text="Resume logging",
             width=125,
             height=28,
             fg_color=theme.ACCENT_GREEN,
@@ -520,18 +521,19 @@ class UltimateApp:
 
         self.btn_log_start = ctk.CTkButton(
             ctrl_frame_log,
-            text="▶ Start bulk logging",
+            text="Start bulk logging",
             font=ctk.CTkFont(weight="bold"),
             fg_color=theme.ACCENT_GREEN,
             hover_color=theme.ACCENT_GREEN_HOVER,
             height=36,
+            width=180,
             command=self._start_bulk_logging
         )
         self.btn_log_start.pack(side="left", padx=(0, 6))
 
         self.btn_log_pause = ctk.CTkButton(
             ctrl_frame_log,
-            text="⏸ Pause",
+            text="Pause",
             width=90,
             height=36,
             state="disabled",
@@ -541,7 +543,7 @@ class UltimateApp:
 
         self.btn_log_stop = ctk.CTkButton(
             ctrl_frame_log,
-            text="⏹ Stop",
+            text="Stop",
             width=90,
             height=36,
             fg_color=theme.ACCENT_RED,
@@ -575,7 +577,7 @@ class UltimateApp:
             self.txt_log_message.insert("1.0", templates[0])
 
             self.btn_log_start.configure(
-                text="▶ Start bulk logging",
+                text="Start bulk logging",
                 fg_color=theme.ACCENT_GREEN,
                 hover_color=theme.ACCENT_GREEN_HOVER
             )
@@ -603,7 +605,7 @@ class UltimateApp:
             self.txt_log_message.insert("1.0", "[Ponechat původní]")
 
             self.btn_log_start.configure(
-                text="✏️ Start editing logs",
+                text="Start editing logs",
                 fg_color=theme.ACCENT_BLUE,
                 hover_color=theme.ACCENT_BLUE_HOVER
             )
@@ -622,7 +624,7 @@ class UltimateApp:
             self.frame_delete_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
 
             self.btn_log_start.configure(
-                text="🗑️ Delete logs",
+                text="Delete logs",
                 fg_color=theme.ACCENT_RED,
                 hover_color=theme.ACCENT_RED_HOVER
             )
@@ -754,9 +756,10 @@ class UltimateApp:
         self.ignore_path_entry = ctk.CTkEntry(file_frame, placeholder_text="Select GPX/LOC file(s)...")
         self.ignore_path_entry.pack(side="left", fill="x", expand=True, padx=8)
 
-        ctk.CTkButton(file_frame, text="Browse file(s)", width=110, command=self._browse_ignore_file).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="Import to list", width=100, fg_color=theme.ACCENT_BLUE, command=self._import_ignore_file).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="Fetch ignored caches", width=145, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="Browse file(s)", width=100, command=self._browse_ignore_file).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="Import to list", width=95, fg_color=theme.ACCENT_BLUE, command=self._import_ignore_file).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="Import from List", width=110, fg_color=theme.ACCENT_BLUE, command=lambda: self._open_gc_list_import_dialog("ignore")).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="Fetch ignored caches", width=140, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=3)
 
         # Text input & review
         ctk.CTkLabel(box, text="GC codes to process (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
@@ -1646,6 +1649,237 @@ class UltimateApp:
                 omitted_msg = f" ({total_omitted} omitted by filter)" if total_omitted else ""
                 self.log(f"Imported {len(all_codes)} GC codes from {len(files)} file(s){omitted_msg}.", "info")
 
+    def _open_gc_list_import_dialog(self, target: str = "bulk"):
+        """
+        Open dialog to import caches from a Geocaching Bookmark list (by URL, code, or user profile lists).
+        target: 'bulk' (inserts to txt_gc_codes with type filtering) or 'ignore' (inserts to txt_ignore_codes).
+        """
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Import caches from Geocaching List")
+        dialog.geometry("540x330")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 270
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 165
+            dialog.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        pad_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        pad_frame.pack(fill="both", expand=True, padx=20, pady=16)
+
+        ctk.CTkLabel(
+            pad_frame,
+            text="Import caches from Geocaching List",
+            font=ctk.CTkFont(size=15, weight="bold")
+        ).pack(anchor="w", pady=(0, 12))
+
+        # 1. URL or Code Entry (TOP - FIRST with immediate focus)
+        ctk.CTkLabel(
+            pad_frame,
+            text="URL or list code:",
+            font=ctk.CTkFont(weight="bold")
+        ).pack(anchor="w", pady=(4, 2))
+
+        entry_list_ref = ctk.CTkEntry(
+            pad_frame,
+            placeholder_text="https://www.geocaching.com/plan/lists/BMDQMZP or BMDQMZP",
+            height=34
+        )
+        entry_list_ref.pack(fill="x", pady=(0, 10))
+        entry_list_ref.focus_set()
+
+        # 2. Profile Lists Dropdown (SECOND - BELOW entry)
+        ctk.CTkLabel(
+            pad_frame,
+            text="Or select from your profile lists:",
+            font=ctk.CTkFont(weight="bold")
+        ).pack(anchor="w", pady=(4, 2))
+
+        list_row = ctk.CTkFrame(pad_frame, fg_color="transparent")
+        list_row.pack(fill="x", pady=(0, 8))
+
+        user_lists_data: List[Dict[str, Any]] = []
+        combo_user_lists = ctk.CTkComboBox(
+            list_row,
+            values=["-- Select from profile lists --"],
+            height=32,
+            state="readonly"
+        )
+        combo_user_lists.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        def on_list_selected(choice: str):
+            if not choice or choice.startswith("--"):
+                return
+            for item in user_lists_data:
+                label = f"{item['name']} ({item['count']}) - {item['referenceCode']}"
+                if choice == label:
+                    entry_list_ref.delete(0, "end")
+                    entry_list_ref.insert(0, item['referenceCode'])
+                    break
+
+        combo_user_lists.configure(command=on_list_selected)
+
+        btn_refresh = ctk.CTkButton(list_row, text="Refresh", width=75, height=32)
+        btn_refresh.pack(side="left")
+
+        # Status label
+        lbl_status = ctk.CTkLabel(
+            pad_frame,
+            text="Ready",
+            text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(size=12)
+        )
+        lbl_status.pack(anchor="w", pady=(4, 12))
+
+        def load_lists_worker():
+            try:
+                lists = self.client.get_user_lists()
+                user_lists_data.clear()
+                user_lists_data.extend(lists)
+                if lists:
+                    display_vals = ["-- Select from profile lists --"] + [
+                        f"{it['name']} ({it['count']}) - {it['referenceCode']}" for it in lists
+                    ]
+                    def update_combo():
+                        combo_user_lists.configure(values=display_vals)
+                        combo_user_lists.set("-- Select from profile lists --")
+                        lbl_status.configure(text=f"Loaded {len(lists)} list(s) from profile.", text_color=theme.TEXT_MUTED)
+                        btn_refresh.configure(state="normal")
+                    dialog.after(0, update_combo)
+                else:
+                    def update_empty():
+                        lbl_status.configure(text="No lists found or not logged in.", text_color=theme.TEXT_MUTED)
+                        btn_refresh.configure(state="normal")
+                    dialog.after(0, update_empty)
+            except Exception as e:
+                def update_err():
+                    lbl_status.configure(text=f"Error loading lists: {e}", text_color=theme.TEXT_MUTED)
+                    btn_refresh.configure(state="normal")
+                dialog.after(0, update_err)
+
+        def trigger_refresh():
+            btn_refresh.configure(state="disabled")
+            lbl_status.configure(text="Loading lists from profile...", text_color=theme.TEXT_MUTED)
+            threading.Thread(target=load_lists_worker, daemon=True).start()
+
+        btn_refresh.configure(command=trigger_refresh)
+
+        # Action buttons
+        btn_box = ctk.CTkFrame(pad_frame, fg_color="transparent")
+        btn_box.pack(fill="x", side="bottom", pady=(8, 0))
+
+        def do_fetch():
+            raw_input = entry_list_ref.get().strip()
+            ref_code = self.client.extract_list_reference_code(raw_input)
+            if not ref_code:
+                lbl_status.configure(text="Please enter a valid list URL or code (e.g. BMDQMZP).", text_color=theme.ACCENT_RED)
+                return
+
+            btn_fetch.configure(state="disabled")
+            btn_cancel.configure(state="disabled")
+            lbl_status.configure(text=f"Fetching geocaches from list {ref_code}...", text_color=theme.ACCENT_BLUE)
+
+            def fetch_worker():
+                try:
+                    caches, list_name = self.client.get_list_geocaches(ref_code)
+                    if not caches:
+                        def on_empty():
+                            lbl_status.configure(text=f"No caches found in list {ref_code}.", text_color=theme.ACCENT_RED)
+                            btn_fetch.configure(state="normal")
+                            btn_cancel.configure(state="normal")
+                        dialog.after(0, on_empty)
+                        return
+
+                    f_cfg = self.config.filters
+                    total_count = len(caches)
+                    omitted = 0
+
+                    if target == "bulk":
+                        # Filter by active types
+                        if f_cfg.omit_virtual or f_cfg.omit_earth or f_cfg.omit_events or f_cfg.omit_webcam:
+                            filtered_caches = []
+                            for c in caches:
+                                c_type = c.get("geocacheType")
+                                t_name = c_type.get("name") if isinstance(c_type, dict) else c_type
+                                t_id = c_type.get("id") if isinstance(c_type, dict) else None
+                                is_filt = is_cache_filtered(
+                                    t_name,
+                                    omit_virtual=f_cfg.omit_virtual,
+                                    omit_earth=f_cfg.omit_earth,
+                                    omit_events=f_cfg.omit_events,
+                                    omit_webcam=f_cfg.omit_webcam
+                                )
+                                if not is_filt and t_id is not None:
+                                    is_filt = is_cache_filtered(
+                                        t_id,
+                                        omit_virtual=f_cfg.omit_virtual,
+                                        omit_earth=f_cfg.omit_earth,
+                                        omit_events=f_cfg.omit_events,
+                                        omit_webcam=f_cfg.omit_webcam
+                                    )
+                                if not is_filt:
+                                    filtered_caches.append(c)
+
+                            omitted = total_count - len(filtered_caches)
+                            caches = filtered_caches
+
+                        codes = [c["referenceCode"] for c in caches if c.get("referenceCode")]
+                        def apply_bulk():
+                            if codes:
+                                self.txt_gc_codes.insert("end", " ".join(codes) + "\n")
+                                list_disp = f" '{list_name}'" if list_name else f" {ref_code}"
+                                omit_str = f" ({omitted} omitted by filter)" if omitted else ""
+                                self.log(f"Imported {len(codes)} GC codes from list{list_disp}{omit_str}.", "info")
+                            dialog.destroy()
+                        dialog.after(0, apply_bulk)
+                    else:
+                        # Target: ignore list
+                        codes = [c["referenceCode"] for c in caches if c.get("referenceCode")]
+                        def apply_ignore():
+                            if codes:
+                                self.txt_ignore_codes.insert("end", " ".join(codes) + "\n")
+                                list_disp = f" '{list_name}'" if list_name else f" {ref_code}"
+                                self.log(f"Imported {len(codes)} GC codes from list{list_disp}.", "info")
+                            dialog.destroy()
+                        dialog.after(0, apply_ignore)
+
+                except Exception as e:
+                    def on_err():
+                        lbl_status.configure(text=f"Error fetching caches: {e}", text_color=theme.ACCENT_RED)
+                        btn_fetch.configure(state="normal")
+                        btn_cancel.configure(state="normal")
+                    dialog.after(0, on_err)
+
+            threading.Thread(target=fetch_worker, daemon=True).start()
+
+        btn_fetch = ctk.CTkButton(
+            btn_box,
+            text="Fetch caches",
+            font=ctk.CTkFont(weight="bold"),
+            fg_color=theme.ACCENT_GREEN,
+            hover_color=theme.ACCENT_GREEN_HOVER,
+            height=34,
+            command=do_fetch
+        )
+        btn_fetch.pack(side="left", padx=(0, 6))
+
+        btn_cancel = ctk.CTkButton(
+            btn_box,
+            text="Cancel",
+            width=90,
+            height=34,
+            fg_color=theme.CARD_BORDER,
+            command=dialog.destroy
+        )
+        btn_cancel.pack(side="left")
+
+        # Trigger initial background load of profile lists
+        trigger_refresh()
+
     def _start_bulk_logging(self, resume: bool = False):
         raw_text = self.txt_gc_codes.get("1.0", "end").strip()
         codes = extract_gc_codes_from_string(raw_text)
@@ -1762,7 +1996,7 @@ class UltimateApp:
 
         self.is_running = True
         self.btn_log_start.configure(state="disabled")
-        self.btn_log_pause.configure(state="normal", text="⏸ Pause")
+        self.btn_log_pause.configure(state="normal", text="Pause")
         self.btn_log_stop.configure(state="normal")
         self.progress_bar.set(0)
 
@@ -2438,14 +2672,14 @@ class UltimateApp:
             if hasattr(self, "btn_coords_pause"):
                 self.btn_coords_pause.configure(text="⏸ Pause")
             if hasattr(self, "btn_log_pause"):
-                self.btn_log_pause.configure(text="⏸ Pause")
+                self.btn_log_pause.configure(text="Pause")
             self.log("Operation resumed.", "info")
         else:
             self.safety.pause()
             if hasattr(self, "btn_coords_pause"):
                 self.btn_coords_pause.configure(text="▶ Resume")
             if hasattr(self, "btn_log_pause"):
-                self.btn_log_pause.configure(text="▶ Resume")
+                self.btn_log_pause.configure(text="Resume")
             self.log("Operation paused by user.", "warning")
 
     def _stop_operation(self):
@@ -2564,7 +2798,7 @@ class UltimateApp:
         if hasattr(self, "btn_log_start"):
             self.btn_log_start.configure(state="normal")
         if hasattr(self, "btn_log_pause"):
-            self.btn_log_pause.configure(state="disabled", text="⏸ Pause")
+            self.btn_log_pause.configure(state="disabled", text="Pause")
         if hasattr(self, "btn_log_stop"):
             self.btn_log_stop.configure(state="disabled")
         if hasattr(self, "lbl_eta"):
