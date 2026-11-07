@@ -408,7 +408,9 @@ class CacheLogger:
         self,
         gc_codes: List[str],
         on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
-        on_log: Optional[Callable[[str, str], None]] = None
+        on_log: Optional[Callable[[str, str], None]] = None,
+        source_list_code: Optional[str] = None,
+        remove_from_source_list: bool = False
     ) -> Dict[str, Any]:
         """Add multiple caches to the Ignore list."""
         self.safety.reset()
@@ -446,7 +448,13 @@ class CacheLogger:
             # Fast check: already on ignore list (0 network calls)
             if clean_code in ignored_set:
                 success_count += 1
-                log(f"{prefix} 🚫 Already on Ignore list", "info")
+                log(f"{prefix} Already on Ignore list", "info")
+                if remove_from_source_list and source_list_code:
+                    del_ok, del_msg = self.client.remove_cache_from_list(source_list_code, clean_code)
+                    if del_ok:
+                        log(f"{prefix} Removed from source list {source_list_code}", "info")
+                    else:
+                        log(f"{prefix} Could not remove from source list: {del_msg}", "warning")
                 percent = (idx / total) * 100
                 if on_progress:
                     on_progress(idx, total, percent, None, gc_code)
@@ -457,11 +465,17 @@ class CacheLogger:
             if success:
                 success_count += 1
                 ignored_set.add(clean_code)
-                log(f"{prefix} 🚫 {message}", "success")
+                log(f"{prefix} {message}", "success")
+                if remove_from_source_list and source_list_code:
+                    del_ok, del_msg = self.client.remove_cache_from_list(source_list_code, clean_code)
+                    if del_ok:
+                        log(f"{prefix} Removed from source list {source_list_code}", "info")
+                    else:
+                        log(f"{prefix} Could not remove from source list: {del_msg}", "warning")
             else:
                 failed_count += 1
                 failed_items.append({"gccode": gc_code, "reason": message})
-                log(f"{prefix} ⚠️ {message}", "warning")
+                log(f"{prefix} {message}", "warning")
 
             percent = (idx / total) * 100
             if on_progress:

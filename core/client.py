@@ -1364,3 +1364,34 @@ class GeocachingClient:
 
         return geocaches, list_name
 
+    def remove_cache_from_list(self, list_ref: str, gc_code: str) -> Tuple[bool, str]:
+        """
+        Remove a single geocache from a Bookmark list using Groundspeak Web Proxy API.
+        Endpoint: DELETE /api/proxy/web/v1/lists/{list_ref}/geocaches/{gc_code}
+        """
+        ref_code = self.extract_list_reference_code(list_ref)
+        if not ref_code:
+            return False, "Invalid list reference code"
+
+        clean_code = gc_code.strip().upper()
+        bearer = self.get_oauth_bearer_token()
+        headers = {
+            "Accept": "application/json",
+            "Referer": f"{self.BASE_URL}/plan/lists/{ref_code}"
+        }
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        csrf = self.get_csrf_token()
+        if csrf:
+            headers["X-Csrf-Token"] = csrf
+
+        try:
+            url = f"{self.BASE_URL}/api/proxy/web/v1/lists/{ref_code}/geocaches/{clean_code}"
+            resp = self.session.delete(url, headers=headers, timeout=12)
+            if resp.status_code in (200, 204):
+                return True, f"Removed {clean_code} from list {ref_code}"
+            return False, f"HTTP {resp.status_code}: {resp.text[:100]}"
+        except Exception as e:
+            return False, f"Error removing {clean_code} from list: {e}"
+

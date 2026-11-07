@@ -67,6 +67,8 @@ class UltimateApp:
         self.selected_coords_files: List[str] = []
         self.selected_ignore_files: List[str] = []
         self.is_running = False
+        self.ignore_source_list_code: Optional[str] = None
+        self.var_empty_source_list = ctk.BooleanVar(value=False)
 
         # Console log buffering for high UI responsiveness
         self._log_buffer: List[str] = []
@@ -797,6 +799,14 @@ class UltimateApp:
             fg_color=theme.CARD_BORDER,
             command=lambda: self.txt_ignore_codes.delete("1.0", "end")
         ).pack(side="left", padx=6)
+
+        self.chk_ignore_empty_source = ctk.CTkCheckBox(
+            btn_row,
+            text="Empty source list on ignore",
+            font=ctk.CTkFont(size=12),
+            variable=self.var_empty_source_list
+        )
+        self.chk_ignore_empty_source.pack(side="left", padx=10)
 
     # --------------------------------------------------------------------------
     # Tab 5: Config & Accounts (Visual Settings Editor)
@@ -1656,14 +1666,14 @@ class UltimateApp:
         """
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Import caches from Geocaching List")
-        dialog.geometry("540x330")
+        dialog.geometry("540x360")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
 
         try:
             x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 270
-            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 165
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 180
             dialog.geometry(f"+{x}+{y}")
         except Exception:
             pass
@@ -1726,6 +1736,16 @@ class UltimateApp:
         btn_refresh = ctk.CTkButton(list_row, text="Refresh", width=75, height=32)
         btn_refresh.pack(side="left")
 
+        # Optional checkbox for emptying list on ignore
+        if target == "ignore":
+            chk_empty = ctk.CTkCheckBox(
+                pad_frame,
+                text="Empty list after ignoring (remove items from list)",
+                font=ctk.CTkFont(size=12),
+                variable=self.var_empty_source_list
+            )
+            chk_empty.pack(anchor="w", pady=(4, 4))
+
         # Status label
         lbl_status = ctk.CTkLabel(
             pad_frame,
@@ -1733,7 +1753,7 @@ class UltimateApp:
             text_color=theme.TEXT_MUTED,
             font=ctk.CTkFont(size=12)
         )
-        lbl_status.pack(anchor="w", pady=(4, 12))
+        lbl_status.pack(anchor="w", pady=(4, 8))
 
         def load_lists_worker():
             try:
@@ -1741,13 +1761,33 @@ class UltimateApp:
                 user_lists_data.clear()
                 user_lists_data.extend(lists)
                 if lists:
+                    selected_val = "-- Select from profile lists --"
+                    if target == "ignore":
+                        ignore_lists = [it for it in lists if "ignore" in it.get("name", "").lower()]
+                        other_lists = [it for it in lists if "ignore" not in it.get("name", "").lower()]
+                        lists = ignore_lists + other_lists
+                        user_lists_data.clear()
+                        user_lists_data.extend(lists)
+                        if ignore_lists:
+                            first_ignore = ignore_lists[0]
+                            selected_val = f"{first_ignore['name']} ({first_ignore['count']}) - {first_ignore['referenceCode']}"
+
                     display_vals = ["-- Select from profile lists --"] + [
                         f"{it['name']} ({it['count']}) - {it['referenceCode']}" for it in lists
                     ]
                     def update_combo():
                         combo_user_lists.configure(values=display_vals)
-                        combo_user_lists.set("-- Select from profile lists --")
-                        lbl_status.configure(text=f"Loaded {len(lists)} list(s) from profile.", text_color=theme.TEXT_MUTED)
+                        combo_user_lists.set(selected_val)
+                        if selected_val != "-- Select from profile lists --":
+                            for item in user_lists_data:
+                                label = f"{item['name']} ({item['count']}) - {item['referenceCode']}"
+                                if selected_val == label:
+                                    entry_list_ref.delete(0, "end")
+                                    entry_list_ref.insert(0, item['referenceCode'])
+                                    lbl_status.configure(text=f"Loaded {len(lists)} list(s). Pre-selected '{item['name']}'.", text_color=theme.TEXT_MUTED)
+                                    break
+                        else:
+                            lbl_status.configure(text=f"Loaded {len(lists)} list(s) from profile.", text_color=theme.TEXT_MUTED)
                         btn_refresh.configure(state="normal")
                     dialog.after(0, update_combo)
                 else:
@@ -1841,9 +1881,11 @@ class UltimateApp:
                         codes = [c["referenceCode"] for c in caches if c.get("referenceCode")]
                         def apply_ignore():
                             if codes:
+                                self.ignore_source_list_code = ref_code
                                 self.txt_ignore_codes.insert("end", " ".join(codes) + "\n")
                                 list_disp = f" '{list_name}'" if list_name else f" {ref_code}"
-                                self.log(f"Imported {len(codes)} GC codes from list{list_disp}.", "info")
+                                empty_msg = " (will empty from list on ignore)" if self.var_empty_source_list.get() else ""
+                                self.log(f"Imported {len(codes)} GC codes from list{list_disp}{empty_msg}.", "info")
                             dialog.destroy()
                         dialog.after(0, apply_ignore)
 
@@ -2213,7 +2255,10 @@ class UltimateApp:
             messagebox.showwarning("Ignore", "No GC codes found to ignore.", parent=self.root)
             return
 
-        if not messagebox.askyesno("Confirm", f"Add {len(codes)} caches to Ignore list?", parent=self.root):
+        remove_from_list = self.var_empty_source_list.get()
+        source_list = self.ignore_source_list_code
+        confirm_extra = f"\n(Items will also be removed from list {source_list})" if remove_from_list and source_list else ""
+        if not messagebox.askyesno("Confirm", f"Add {len(codes)} caches to Ignore list?{confirm_extra}", parent=self.root):
             return
 
         self.is_running = True
@@ -2221,7 +2266,12 @@ class UltimateApp:
 
         def worker():
             try:
-                res = logger.run_ignore(codes, on_log=self.log)
+                res = logger.run_ignore(
+                    codes,
+                    on_log=self.log,
+                    source_list_code=source_list,
+                    remove_from_source_list=remove_from_list
+                )
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Ignore list", res))
             except Exception as e:
