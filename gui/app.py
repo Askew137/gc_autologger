@@ -756,7 +756,7 @@ class UltimateApp:
 
         ctk.CTkButton(file_frame, text="Browse file(s)", width=110, command=self._browse_ignore_file).pack(side="left", padx=3)
         ctk.CTkButton(file_frame, text="Import to list", width=100, fg_color=theme.ACCENT_BLUE, command=self._import_ignore_file).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="📥 Fetch ignored caches", width=145, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=3)
+        ctk.CTkButton(file_frame, text="Fetch ignored caches", width=145, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=3)
 
         # Text input & review
         ctk.CTkLabel(box, text="GC codes to process (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
@@ -769,7 +769,7 @@ class UltimateApp:
 
         ctk.CTkButton(
             btn_row,
-            text="🚫 Add to ignore list",
+            text="Add to ignore list",
             font=ctk.CTkFont(weight="bold"),
             fg_color=theme.ACCENT_RED,
             hover_color=theme.ACCENT_RED_HOVER,
@@ -779,7 +779,7 @@ class UltimateApp:
 
         ctk.CTkButton(
             btn_row,
-            text="✅ Remove from ignore list (Unignore)",
+            text="Remove from ignore list (Unignore)",
             font=ctk.CTkFont(weight="bold"),
             fg_color=theme.ACCENT_GREEN,
             hover_color=theme.ACCENT_GREEN_HOVER,
