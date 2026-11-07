@@ -508,7 +508,7 @@ class UltimateApp:
 
         self.btn_resume_logging_action = ctk.CTkButton(
             self.frame_resume_logging,
-            text="Resume logging",
+            text="▶ Resume logging",
             width=125,
             height=28,
             fg_color=theme.ACCENT_GREEN,
@@ -523,7 +523,7 @@ class UltimateApp:
 
         self.btn_log_start = ctk.CTkButton(
             ctrl_frame_log,
-            text="Start bulk logging",
+            text="▶ Start bulk logging",
             font=ctk.CTkFont(weight="bold"),
             fg_color=theme.ACCENT_GREEN,
             hover_color=theme.ACCENT_GREEN_HOVER,
@@ -535,7 +535,7 @@ class UltimateApp:
 
         self.btn_log_pause = ctk.CTkButton(
             ctrl_frame_log,
-            text="Pause",
+            text="⏸ Pause",
             width=90,
             height=36,
             state="disabled",
@@ -545,7 +545,7 @@ class UltimateApp:
 
         self.btn_log_stop = ctk.CTkButton(
             ctrl_frame_log,
-            text="Stop",
+            text="⏹ Stop",
             width=90,
             height=36,
             fg_color=theme.ACCENT_RED,
@@ -579,7 +579,7 @@ class UltimateApp:
             self.txt_log_message.insert("1.0", templates[0])
 
             self.btn_log_start.configure(
-                text="Start bulk logging",
+                text="▶ Start bulk logging",
                 fg_color=theme.ACCENT_GREEN,
                 hover_color=theme.ACCENT_GREEN_HOVER
             )
@@ -607,7 +607,7 @@ class UltimateApp:
             self.txt_log_message.insert("1.0", "[Ponechat původní]")
 
             self.btn_log_start.configure(
-                text="Start editing logs",
+                text="▶ Start editing logs",
                 fg_color=theme.ACCENT_BLUE,
                 hover_color=theme.ACCENT_BLUE_HOVER
             )
@@ -626,7 +626,7 @@ class UltimateApp:
             self.frame_delete_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
 
             self.btn_log_start.configure(
-                text="Delete logs",
+                text="▶ Delete logs",
                 fg_color=theme.ACCENT_RED,
                 hover_color=theme.ACCENT_RED_HOVER
             )
@@ -2038,7 +2038,7 @@ class UltimateApp:
 
         self.is_running = True
         self.btn_log_start.configure(state="disabled")
-        self.btn_log_pause.configure(state="normal", text="Pause")
+        self.btn_log_pause.configure(state="normal", text="⏸ Pause")
         self.btn_log_stop.configure(state="normal")
         self.progress_bar.set(0)
 
@@ -2722,14 +2722,14 @@ class UltimateApp:
             if hasattr(self, "btn_coords_pause"):
                 self.btn_coords_pause.configure(text="⏸ Pause")
             if hasattr(self, "btn_log_pause"):
-                self.btn_log_pause.configure(text="Pause")
+                self.btn_log_pause.configure(text="⏸ Pause")
             self.log("Operation resumed.", "info")
         else:
             self.safety.pause()
             if hasattr(self, "btn_coords_pause"):
                 self.btn_coords_pause.configure(text="▶ Resume")
             if hasattr(self, "btn_log_pause"):
-                self.btn_log_pause.configure(text="Resume")
+                self.btn_log_pause.configure(text="▶ Resume")
             self.log("Operation paused by user.", "warning")
 
     def _stop_operation(self):
@@ -2848,7 +2848,7 @@ class UltimateApp:
         if hasattr(self, "btn_log_start"):
             self.btn_log_start.configure(state="normal")
         if hasattr(self, "btn_log_pause"):
-            self.btn_log_pause.configure(state="disabled", text="Pause")
+            self.btn_log_pause.configure(state="disabled", text="⏸ Pause")
         if hasattr(self, "btn_log_stop"):
             self.btn_log_stop.configure(state="disabled")
         if hasattr(self, "lbl_eta"):
