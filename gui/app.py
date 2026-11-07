@@ -750,18 +750,14 @@ class UltimateApp:
 
         ctk.CTkLabel(box, text="Ignore list management (Add / Remove caches)", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=14, pady=(12, 6))
 
-        # File Import row
-        file_frame = ctk.CTkFrame(box, fg_color="transparent")
-        file_frame.pack(fill="x", padx=14, pady=6)
+        # Import buttons row (matching Bulk Logging design)
+        import_row = ctk.CTkFrame(box, fg_color="transparent")
+        import_row.pack(fill="x", padx=14, pady=6)
 
-        ctk.CTkLabel(file_frame, text="Import from GPX/LOC:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
-        self.ignore_path_entry = ctk.CTkEntry(file_frame, placeholder_text="Select GPX/LOC file(s)...")
-        self.ignore_path_entry.pack(side="left", fill="x", expand=True, padx=8)
-
-        ctk.CTkButton(file_frame, text="Browse file(s)", width=100, command=self._browse_ignore_file).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="Import to list", width=95, fg_color=theme.ACCENT_BLUE, command=self._import_ignore_file).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="Import from List", width=110, fg_color=theme.ACCENT_BLUE, command=lambda: self._open_gc_list_import_dialog("ignore")).pack(side="left", padx=3)
-        ctk.CTkButton(file_frame, text="Fetch ignored caches", width=140, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=3)
+        ctk.CTkButton(import_row, text="Import from GPX", width=120, command=self._browse_ignore_file).pack(side="left", padx=4)
+        ctk.CTkButton(import_row, text="Import from List", width=120, command=lambda: self._open_gc_list_import_dialog("ignore")).pack(side="left", padx=4)
+        ctk.CTkButton(import_row, text="Fetch ignored caches", width=145, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=self._fetch_ignored_caches).pack(side="left", padx=4)
+        ctk.CTkButton(import_row, text="Clear codes", width=90, fg_color=theme.CARD_BORDER, command=lambda: self.txt_ignore_codes.delete("1.0", "end")).pack(side="left", padx=4)
 
         # Text input & review
         ctk.CTkLabel(box, text="GC codes to process (from imported files or paste here):", text_color=theme.TEXT_MUTED).pack(anchor="w", padx=14, pady=(6, 2))
@@ -792,14 +788,6 @@ class UltimateApp:
             command=self._start_bulk_unignore
         ).pack(side="left", padx=4)
 
-        ctk.CTkButton(
-            btn_row,
-            text="Clear codes",
-            width=90,
-            fg_color=theme.CARD_BORDER,
-            command=lambda: self.txt_ignore_codes.delete("1.0", "end")
-        ).pack(side="left", padx=6)
-
         self.chk_ignore_empty_source = ctk.CTkCheckBox(
             btn_row,
             text="Empty source list on ignore",
@@ -815,6 +803,55 @@ class UltimateApp:
     def _build_tab_settings(self):
         scroll = ctk.CTkScrollableFrame(self.tab_settings)
         scroll.pack(fill="both", expand=True, padx=6, pady=6)
+
+        # Smooth macOS & Tk 9.1 trackpad / mouse wheel scroll support
+        def _is_mouse_over_settings():
+            try:
+                if hasattr(self, "tabview") and self.tabview.get() != "⚙️ Config & Accounts":
+                    return False
+                x = self.root.winfo_pointerx()
+                y = self.root.winfo_pointery()
+                frame = scroll._parent_frame
+                fx = frame.winfo_rootx()
+                fy = frame.winfo_rooty()
+                fw = frame.winfo_width()
+                fh = frame.winfo_height()
+                return (fx <= x <= fx + fw) and (fy <= y <= fy + fh)
+            except Exception:
+                return False
+
+        def _on_settings_wheel(event):
+            if not _is_mouse_over_settings():
+                return
+            delta = 0
+            if hasattr(event, "delta") and event.delta != 0:
+                if sys.platform == "darwin":
+                    delta = int(-1 * event.delta)
+                    if delta == 0:
+                        delta = -1 if event.delta > 0 else 1
+                elif sys.platform.startswith("win"):
+                    delta = -int(event.delta / 60)
+                    if delta == 0:
+                        delta = -1 if event.delta > 0 else 1
+                else:
+                    delta = -1 if event.delta > 0 else 1
+            elif hasattr(event, "num"):
+                if event.num == 4:
+                    delta = -1
+                elif event.num == 5:
+                    delta = 1
+
+            if delta != 0:
+                try:
+                    scroll._parent_canvas.yview_scroll(delta, "units")
+                except Exception:
+                    pass
+
+        self.root.bind_all("<MouseWheel>", _on_settings_wheel, add=True)
+        try:
+            self.root.bind_all("<TouchpadScroll>", _on_settings_wheel, add=True)
+        except Exception:
+            pass
 
         # 1. Accounts Section
         acc_sec = ctk.CTkFrame(scroll)
@@ -986,36 +1023,7 @@ class UltimateApp:
 
             # Drag handle
             drag_handle = ctk.CTkLabel(row, text=" ☰ ", font=ctk.CTkFont(size=14, weight="bold"), text_color=theme.TEXT_MUTED, cursor="fleur")
-            drag_handle.pack(side="left", padx=(8, 2))
-
-            # Up / Down Steppers
-            btn_up = ctk.CTkButton(
-                row,
-                text="▲",
-                width=24,
-                height=22,
-                font=ctk.CTkFont(size=10),
-                fg_color=theme.BG_TERTIARY if idx > 0 else theme.CARD_BG,
-                hover_color=theme.ACCENT_BLUE if idx > 0 else theme.CARD_BG,
-                text_color=theme.TEXT_PRIMARY if idx > 0 else theme.TEXT_MUTED,
-                state="normal" if idx > 0 else "disabled",
-                command=lambda i=idx: self._on_move_account(i, -1)
-            )
-            btn_up.pack(side="left", padx=1)
-
-            btn_down = ctk.CTkButton(
-                row,
-                text="▼",
-                width=24,
-                height=22,
-                font=ctk.CTkFont(size=10),
-                fg_color=theme.BG_TERTIARY if idx < total - 1 else theme.CARD_BG,
-                hover_color=theme.ACCENT_BLUE if idx < total - 1 else theme.CARD_BG,
-                text_color=theme.TEXT_PRIMARY if idx < total - 1 else theme.TEXT_MUTED,
-                state="normal" if idx < total - 1 else "disabled",
-                command=lambda i=idx: self._on_move_account(i, 1)
-            )
-            btn_down.pack(side="left", padx=(1, 6))
+            drag_handle.pack(side="left", padx=(8, 4))
 
             def_tag = " (DEFAULT)" if acc.is_default else ""
             pwd_tag = "" if acc.password else " [Copy only / no pwd]"
@@ -2192,53 +2200,24 @@ class UltimateApp:
             self.config.folder_path = chosen_dir
             self.config_mgr.save()
 
-            self.selected_ignore_files = list(files)
-            self.ignore_path_entry.delete(0, "end")
-            if len(files) == 1:
-                self.ignore_path_entry.insert(0, files[0])
+            all_codes = []
+            for path in files:
+                if os.path.isfile(path):
+                    items = parse_file(path)
+                    all_codes.extend([it.gccode for it in items if it.gccode])
+                elif os.path.isdir(path):
+                    items = parse_folder(path)
+                    all_codes.extend([it.gccode for it in items if it.gccode])
+
+            # Deduplicate while preserving order
+            seen = set()
+            unique_codes = [c for c in all_codes if not (c in seen or seen.add(c))]
+
+            if unique_codes:
+                self.txt_ignore_codes.insert("end", " ".join(unique_codes) + "\n")
+                self.log(f"Imported {len(unique_codes)} unique GC codes from {len(files)} file(s).", "info")
             else:
-                summary = f"[{len(files)} files selected] {', '.join(os.path.basename(f) for f in files[:2])}{'...' if len(files) > 2 else ''}"
-                self.ignore_path_entry.insert(0, summary)
-
-            self._import_ignore_file()
-
-    def _import_ignore_file(self):
-        files_to_load = getattr(self, "selected_ignore_files", [])
-        raw = self.ignore_path_entry.get().strip()
-
-        # If user manually typed/pasted a path into entry
-        if not files_to_load or (raw and not raw.startswith("[") and (not files_to_load or raw != files_to_load[0])):
-            if ";" in raw:
-                files_to_load = [f.strip() for f in raw.split(";") if f.strip() and os.path.exists(f.strip())]
-            elif raw and os.path.exists(raw):
-                files_to_load = [raw]
-
-        if not files_to_load:
-            return
-
-        all_codes = []
-        for path in files_to_load:
-            if os.path.isfile(path):
-                items = parse_file(path)
-                all_codes.extend([it.gccode for it in items])
-            elif os.path.isdir(path):
-                items = parse_folder(path)
-                all_codes.extend([it.gccode for it in items])
-
-        # Deduplicate while preserving order
-        seen = set()
-        unique_codes = [c for c in all_codes if not (c in seen or seen.add(c))]
-
-        if unique_codes:
-            current = self.txt_ignore_codes.get("1.0", "end").strip()
-            new_text = (current + "\n" if current else "") + "\n".join(unique_codes) + "\n"
-            self.txt_ignore_codes.delete("1.0", "end")
-            self.txt_ignore_codes.insert("1.0", new_text)
-            src_label = os.path.basename(files_to_load[0]) if len(files_to_load) == 1 else f"{len(files_to_load)} files"
-            self.log(f"Imported {len(unique_codes)} GC codes from {src_label} into Ignore List.", "info")
-            messagebox.showinfo("Imported", f"Successfully imported {len(unique_codes)} GC codes!", parent=self.root)
-        else:
-            messagebox.showinfo("Import", "No GC codes found in given source.", parent=self.root)
+                messagebox.showinfo("Import", "No GC codes found in selected file(s).", parent=self.root)
 
     def _insert_copied_codes(self, codes: List[str]):
         self.tabview.set("📝 Bulk log caches")
@@ -2424,36 +2403,7 @@ class UltimateApp:
 
             # Drag handle
             drag_handle = ctk.CTkLabel(row, text=" ☰ ", font=ctk.CTkFont(size=14, weight="bold"), text_color=theme.TEXT_MUTED, cursor="fleur")
-            drag_handle.pack(side="left", padx=(8, 2))
-
-            # Up / Down Steppers
-            btn_up = ctk.CTkButton(
-                row,
-                text="▲",
-                width=24,
-                height=22,
-                font=ctk.CTkFont(size=10),
-                fg_color=theme.BG_TERTIARY if idx > 0 else theme.CARD_BG,
-                hover_color=theme.ACCENT_BLUE if idx > 0 else theme.CARD_BG,
-                text_color=theme.TEXT_PRIMARY if idx > 0 else theme.TEXT_MUTED,
-                state="normal" if idx > 0 else "disabled",
-                command=lambda i=idx: self._on_move_template(i, -1)
-            )
-            btn_up.pack(side="left", padx=1)
-
-            btn_down = ctk.CTkButton(
-                row,
-                text="▼",
-                width=24,
-                height=22,
-                font=ctk.CTkFont(size=10),
-                fg_color=theme.BG_TERTIARY if idx < total - 1 else theme.CARD_BG,
-                hover_color=theme.ACCENT_BLUE if idx < total - 1 else theme.CARD_BG,
-                text_color=theme.TEXT_PRIMARY if idx < total - 1 else theme.TEXT_MUTED,
-                state="normal" if idx < total - 1 else "disabled",
-                command=lambda i=idx: self._on_move_template(i, 1)
-            )
-            btn_down.pack(side="left", padx=(1, 6))
+            drag_handle.pack(side="left", padx=(8, 4))
 
             display_snip = tmpl.replace("\n", " ").strip()
             if len(display_snip) > 55:
