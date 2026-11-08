@@ -41,7 +41,7 @@ class CacheLogger:
         log_type_key: str,
         date_str: str,
         log_text: str = "",
-        skip_already_found: bool = False,
+        skip_already_found: bool = True,
         omit_virtual: bool = False,
         omit_earth: bool = False,
         omit_events: bool = False,
@@ -63,8 +63,10 @@ class CacheLogger:
         :param resume: If True, resumes previous incomplete run by skipping completed codes
         """
         self.safety.reset()
-        total = len(gc_codes)
-        success_count = 0
+        clean_codes = [c.strip().upper() for c in gc_codes if c.strip()]
+        total = len(clean_codes)
+        logged_count = 0
+        skipped_filter_count = 0
         failed_count = 0
         failed_items: List[Dict[str, str]] = []
 
@@ -86,7 +88,7 @@ class CacheLogger:
                     completed_codes = set(state.completed_gccodes)
                     log(f"Resuming run from checkpoint: {len(completed_codes)}/{total} already finished.", "info")
             else:
-                checkpoint_manager.start_logging_run(log_type_key, date_str, log_text, gc_codes)
+                checkpoint_manager.start_logging_run(log_type_key, date_str, log_text, clean_codes)
 
         # Format date as ISO string (e.g. "2026-10-06T12:00:00.000Z")
         iso_date = f"{date_str}T12:00:00.000Z"
@@ -97,21 +99,74 @@ class CacheLogger:
             log("Session is invalid. Please log in first.", "error")
             return {"total": total, "success": 0, "failed": total, "failed_items": []}
 
+        # Clear cached details to ensure fresh found status from Geocaching.com
+        if hasattr(self.client, "clear_cache_details"):
+            self.client.clear_cache_details()
+
         start_time = time.time()
+
+        # Pre-filter already found caches when logging as "Found it"
+        already_found_items: List[Tuple[str, Optional[str]]] = []
+        to_process_codes: List[str] = []
+
+        if log_type_id == 2 and skip_already_found:
+            for clean_code in clean_codes:
+                if clean_code in completed_codes:
+                    already_found_items.append((clean_code, None))
+                    continue
+                is_found, found_date = self.client.is_cache_found(clean_code)
+                if is_found:
+                    already_found_items.append((clean_code, found_date))
+                    if checkpoint_manager:
+                        date_info = f" on {found_date}" if found_date else ""
+                        checkpoint_manager.record_log_item(clean_code, success=True, reason=f"Already found{date_info}")
+                        checkpoint_manager.append_logging_log(f"{clean_code} - Already found{date_info}")
+                else:
+                    to_process_codes.append(clean_code)
+        else:
+            to_process_codes = list(clean_codes)
+
+        already_found_count = len(already_found_items)
+
+        # Case 1: All caches are already found
+        if already_found_count > 0 and len(to_process_codes) == 0:
+            log(f"⏭️ All {total} cache(s) already found on {date_str} (skipped duplicates). Nothing to log.", "info")
+            if on_progress:
+                on_progress(total, total, 100.0, 0.0, "")
+            total_elapsed = time.time() - start_time
+            if checkpoint_manager:
+                checkpoint_manager.finish_logging_run("completed")
+            log(f"Logging complete! Logged: 0 | Skipped: {total} (already found) | Failed: 0 in {total_elapsed:.1f}s", "info")
+            return {
+                "total": total,
+                "success": total,
+                "logged": 0,
+                "skipped": total,
+                "failed": 0,
+                "failed_items": [],
+                "elapsed_seconds": total_elapsed
+            }
+
+        # Case 2: Some caches are already found
+        if already_found_count > 0:
+            codes_preview = ", ".join([c[0] for c in already_found_items[:8]])
+            if already_found_count > 8:
+                codes_preview += f" ... (+{already_found_count - 8} more)"
+            log(f"⏭️ {already_found_count} cache(s) already found (filtered out: {codes_preview}).", "info")
+
         processed_times: List[float] = []
 
-        for idx, gc_code in enumerate(gc_codes, 1):
+        for idx_rel, clean_code in enumerate(to_process_codes, 1):
             if self.safety.is_cancelled:
-                log(f"Logging cancelled by user at item {idx}/{total}.", "warning")
+                log(f"Logging cancelled by user at item {idx_rel}/{len(to_process_codes)}.", "warning")
                 break
 
             item_start = time.time()
-            clean_code = gc_code.strip().upper()
+            idx = already_found_count + idx_rel
             prefix = f"[{idx}/{total}] {clean_code}"
 
-            # Check if already processed in earlier run
+            # Check if already processed in earlier run (for non-duplicate runs)
             if clean_code in completed_codes:
-                success_count += 1
                 log(f"{prefix} ⏭️ Already processed in earlier run (checkpoint skip)", "info")
                 percent = (idx / total) * 100
                 if on_progress:
@@ -127,7 +182,7 @@ class CacheLogger:
                 omit_events=omit_events,
                 omit_webcam=omit_webcam
             ):
-                success_count += 1
+                skipped_filter_count += 1
                 log(f"{prefix} ⏭️ Skipped: Cache type filtered out", "info")
                 if checkpoint_manager:
                     checkpoint_manager.record_log_item(clean_code, success=True, reason="Filtered out")
@@ -137,25 +192,10 @@ class CacheLogger:
                     on_progress(idx, total, percent, None, clean_code)
                 continue
 
-            # Check if cache is already found when logging as "Found it" and user requested duplicate check
-            if log_type_id == 2 and skip_already_found:
-                is_found, found_date = self.client.is_cache_found(clean_code)
-                if is_found:
-                    success_count += 1
-                    date_info = f" on {found_date}" if found_date else ""
-                    log(f"{prefix} ⏭️ Already found{date_info} (skipped duplicate)", "info")
-                    if checkpoint_manager:
-                        checkpoint_manager.record_log_item(clean_code, success=True, reason=f"Already found{date_info}")
-                        checkpoint_manager.append_logging_log(f"{clean_code} - Already found{date_info}")
-                    percent = (idx / total) * 100
-                    if on_progress:
-                        on_progress(idx, total, percent, None, clean_code)
-                    continue
-
             success, message = self.client.create_log(clean_code, log_type_id, iso_date, log_text)
 
             if success:
-                success_count += 1
+                logged_count += 1
                 log(f"{prefix} ✅ Logged as {display_type}", "success")
                 if checkpoint_manager:
                     checkpoint_manager.record_log_item(clean_code, success=True)
@@ -171,14 +211,14 @@ class CacheLogger:
             elapsed_item = time.time() - item_start
             processed_times.append(elapsed_item)
             avg_time = sum(processed_times[-10:]) / len(processed_times[-10:])
-            remaining_items = total - idx
+            remaining_items = len(to_process_codes) - idx_rel
             eta = remaining_items * (avg_time + ((self.safety.min_delay + self.safety.max_delay) / 2))
 
             percent = (idx / total) * 100
             if on_progress:
                 on_progress(idx, total, percent, eta, clean_code)
 
-            if idx < total:
+            if idx_rel < len(to_process_codes):
                 if not self.safety.wait_before_next(idx, total, log_callback=lambda m: log(m, "info")):
                     log("Logging paused/interrupted.", "warning")
                     break
@@ -189,15 +229,20 @@ class CacheLogger:
                 checkpoint_manager.finish_logging_run("cancelled")
             else:
                 checkpoint_manager.finish_logging_run("completed")
+
+        total_skipped = already_found_count + skipped_filter_count
+        success_count = logged_count + total_skipped
         summary = {
             "total": total,
             "success": success_count,
+            "logged": logged_count,
+            "skipped": total_skipped,
             "failed": failed_count,
             "failed_items": failed_items,
             "elapsed_seconds": total_elapsed
         }
 
-        log(f"Logging complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        log(f"Logging complete! Logged: {logged_count} | Skipped: {total_skipped} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
         return summary
 
     def run_edit_log(

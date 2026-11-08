@@ -466,19 +466,10 @@ class UltimateApp:
         self.txt_gc_codes.pack(fill="both", expand=True, padx=10, pady=4)
 
         btn_row = ctk.CTkFrame(right_box, fg_color="transparent")
-        btn_row.pack(fill="x", padx=10, pady=4)
+        btn_row.pack(fill="x", padx=10, pady=(4, 8))
         ctk.CTkButton(btn_row, text="Import from GPX", width=120, command=self._import_codes_from_file).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Import from List", width=120, command=lambda: self._open_gc_list_import_dialog("bulk")).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Clear codes", width=90, fg_color=theme.CARD_BORDER, command=lambda: self.txt_gc_codes.delete("1.0", "end")).pack(side="left", padx=4)
-
-        self.var_skip_already_found = ctk.BooleanVar(value=False)
-        self.chk_skip_already_found = ctk.CTkCheckBox(
-            right_box,
-            text="Skip already found caches (Check duplicates)",
-            font=ctk.CTkFont(size=12),
-            variable=self.var_skip_already_found
-        )
-        self.chk_skip_already_found.pack(anchor="w", padx=10, pady=(2, 6))
 
         # Resume banner frame (shown if an unfinished logging run is detected)
         self.frame_resume_logging = ctk.CTkFrame(
@@ -2099,13 +2090,12 @@ class UltimateApp:
         def worker():
             try:
                 f_cfg = self.config.filters
-                skip_already_found = self.var_skip_already_found.get() if hasattr(self, "var_skip_already_found") else False
                 res = logger.run_log(
                     codes,
                     log_type_key=type_key,
                     date_str=date_str,
                     log_text=log_text,
-                    skip_already_found=skip_already_found,
+                    skip_already_found=True,
                     omit_virtual=f_cfg.omit_virtual,
                     omit_earth=f_cfg.omit_earth,
                     omit_events=f_cfg.omit_events,

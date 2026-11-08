@@ -193,6 +193,10 @@ class GeocachingClient:
         self.current_credentials = None
         self._cache_details_cache.clear()
 
+    def clear_cache_details(self) -> None:
+        """Clear cached cache details to force fresh API queries."""
+        self._cache_details_cache.clear()
+
     def switch_account(self, username: str, password: Optional[str] = None) -> Tuple[bool, str]:
         """
         Switch active session to target username.
@@ -613,7 +617,27 @@ class GeocachingClient:
                         return False, f"API error: {err_msg}"
                     result = item.get("result", {}).get("data", {})
                     log_code = result.get("logReferenceCode", "")
+                    if log_type_id == 2:
+                        code_up = gc_code.strip().upper()
+                        if code_up in self._cache_details_cache:
+                            if "callerSpecific" not in self._cache_details_cache[code_up]:
+                                self._cache_details_cache[code_up]["callerSpecific"] = {}
+                            self._cache_details_cache[code_up]["callerSpecific"]["found"] = date_iso
+                        else:
+                            self._cache_details_cache[code_up] = {
+                                "callerSpecific": {"found": date_iso}
+                            }
                     return True, f"Logged successfully ({log_code})"
+                if log_type_id == 2:
+                    code_up = gc_code.strip().upper()
+                    if code_up in self._cache_details_cache:
+                        if "callerSpecific" not in self._cache_details_cache[code_up]:
+                            self._cache_details_cache[code_up]["callerSpecific"] = {}
+                        self._cache_details_cache[code_up]["callerSpecific"]["found"] = date_iso
+                    else:
+                        self._cache_details_cache[code_up] = {
+                            "callerSpecific": {"found": date_iso}
+                        }
                 return True, "Logged successfully"
 
             if resp.status_code in [401, 403]:
@@ -625,6 +649,16 @@ class GeocachingClient:
                     if resp2.status_code in [200, 201]:
                         data2 = resp2.json()
                         if isinstance(data2, list) and len(data2) > 0 and "error" not in data2[0]:
+                            if log_type_id == 2:
+                                code_up = gc_code.strip().upper()
+                                if code_up in self._cache_details_cache:
+                                    if "callerSpecific" not in self._cache_details_cache[code_up]:
+                                        self._cache_details_cache[code_up]["callerSpecific"] = {}
+                                    self._cache_details_cache[code_up]["callerSpecific"]["found"] = date_iso
+                                else:
+                                    self._cache_details_cache[code_up] = {
+                                        "callerSpecific": {"found": date_iso}
+                                    }
                             return True, "Logged successfully after re-auth"
 
             return False, f"Server returned HTTP {resp.status_code}: {resp.text[:120]}"
@@ -846,12 +880,12 @@ class GeocachingClient:
         except Exception as e:
             return False, f"Error deleting log: {str(e)}"
 
-    def get_cache_details(self, gc_code: str) -> Optional[Dict[str, Any]]:
+    def get_cache_details(self, gc_code: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
         """
         Fetch basic cache metadata (found status, cache type, etc.) with in-memory caching.
         """
         code = gc_code.strip().upper()
-        if code in self._cache_details_cache:
+        if not force_refresh and code in self._cache_details_cache:
             return self._cache_details_cache[code]
 
         try:
