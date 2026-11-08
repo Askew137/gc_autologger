@@ -31,6 +31,7 @@ class GeocachingClient:
     OAUTH_TOKEN_URL = "https://www.geocaching.com/account/oauth/token"
     CSRF_TOKEN_URL = "https://www.geocaching.com/api/auth/csrf"
     USER_COORDS_URL = "https://www.geocaching.com/seek/geocache.usercoordinate"
+    USER_NOTE_URL = "https://www.geocaching.com/seek/geocache.cachenote"
     TRPC_CREATE_LOG_URL = "https://www.geocaching.com/api/live/v1/trpc/web.logs.createGeocacheLog"
     TRPC_UPDATE_LOG_URL = "https://www.geocaching.com/api/live/v1/trpc/web.logs.updateGeocacheLog"
     TRPC_DELETE_LOG_URL = "https://www.geocaching.com/api/live/v1/trpc/web.logs.deleteGeocacheLog"
@@ -554,6 +555,80 @@ class GeocachingClient:
                 if match:
                     return match.group(1).lower() == "true"
 
+                return False
+        except Exception:
+            pass
+        return None
+
+    def upload_personal_note(self, gc_code: str, note: str) -> Tuple[bool, str]:
+        """
+        Upload or update personal cache note for a cache on Geocaching.com.
+        Replicates c:geo GCParser.java:uploadPersonalNote.
+        """
+        cache_id = gc_code_to_cache_id(gc_code)
+        if not cache_id:
+            return False, f"Invalid GC code: {gc_code}"
+
+        token = self.get_verification_token(sample_gccode=gc_code)
+        if not token:
+            return False, "Failed to acquire __RequestVerificationToken"
+
+        headers = {
+            "__RequestVerificationToken": token,
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": self.BASE_URL,
+            "Referer": f"{self.BASE_URL}/geocache/{gc_code}"
+        }
+
+        payload = {
+            "cacheId": cache_id,
+            "note": note
+        }
+
+        try:
+            resp = self.session.post(self.USER_NOTE_URL, headers=headers, json=payload, timeout=15)
+
+            if resp.status_code in [200, 204]:
+                try:
+                    data = resp.json()
+                    if data.get("success") is True or "note" in data:
+                        return True, "Personal note updated"
+                except Exception:
+                    return True, "Personal note updated"
+
+            if resp.status_code in [401, 403]:
+                if self.ensure_valid_session():
+                    refreshed_token = self.get_verification_token(force_refresh=True, sample_gccode=gc_code)
+                    if refreshed_token:
+                        headers["__RequestVerificationToken"] = refreshed_token
+                        resp2 = self.session.post(self.USER_NOTE_URL, headers=headers, json=payload, timeout=15)
+                        if resp2.status_code in [200, 204]:
+                            return True, "Personal note updated"
+
+            return False, f"Server returned HTTP {resp.status_code}: {resp.text[:100]}"
+        except Exception as e:
+            return False, f"Connection error: {str(e)}"
+
+    def has_personal_note(self, gc_code: str) -> Optional[bool]:
+        """
+        Check if a cache already has a personal note on Geocaching.com.
+        Returns True if note exists, False if none, or None if unknown.
+        """
+        try:
+            resp = self.session.get(f"{self.BASE_URL}/geocache/{gc_code}", timeout=10)
+            if resp.status_code == 200:
+                html_text = resp.text
+                token = self._extract_request_verification_token(html_text)
+                if token:
+                    self.verification_token = token
+
+                match = re.search(r'<div id="srOnlyCacheNote"[^>]*>(.*?)</div>', html_text, re.DOTALL)
+                if match and match.group(1).strip():
+                    return True
+                if 'id="viewCacheNote"' in html_text and 'class="formatted"' in html_text:
+                    return True
                 return False
         except Exception:
             pass

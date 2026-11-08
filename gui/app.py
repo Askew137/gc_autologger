@@ -316,22 +316,47 @@ class UltimateApp:
         self.coords_opt_frame = ctk.CTkFrame(self.tab_coords)
         self.coords_opt_frame.pack(fill="x", pady=6, padx=6)
 
-        ctk.CTkLabel(self.coords_opt_frame, text="Upload mode:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=8, sticky="w")
+        # Row 0: Target data selection (Coordinates / Personal Notes)
+        ctk.CTkLabel(self.coords_opt_frame, text="Upload data:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=(8, 4), sticky="w")
+
+        self.var_upload_coords = ctk.BooleanVar(value=True)
+        self.chk_upload_coords = ctk.CTkCheckBox(
+            self.coords_opt_frame,
+            text="Upload coordinates",
+            variable=self.var_upload_coords,
+            command=self._on_coords_options_changed
+        )
+        self.chk_upload_coords.grid(row=0, column=1, padx=10, pady=(8, 4), sticky="w")
+
+        self.var_upload_notes = ctk.BooleanVar(value=True)
+        self.chk_upload_notes = ctk.CTkCheckBox(
+            self.coords_opt_frame,
+            text="Upload personal notes",
+            variable=self.var_upload_notes,
+            command=self._on_coords_options_changed
+        )
+        self.chk_upload_notes.grid(row=0, column=2, padx=15, pady=(8, 4), sticky="w")
+
+        # Row 1: Coordinate mode selector (Complete overwrite / Only unmodified)
+        self.lbl_coords_mode = ctk.CTkLabel(self.coords_opt_frame, text="Coordinate mode:", font=ctk.CTkFont(weight="bold"))
+        self.lbl_coords_mode.grid(row=1, column=0, padx=10, pady=(4, 8), sticky="w")
 
         self.coords_mode_var = ctk.StringVar(value=CoordinateUploader.MODE_OVERWRITE_ALL)
-        ctk.CTkRadioButton(
+        self.rad_coords_overwrite = ctk.CTkRadioButton(
             self.coords_opt_frame,
             text="Complete overwrite (upload all coordinates in file)",
             variable=self.coords_mode_var,
             value=CoordinateUploader.MODE_OVERWRITE_ALL
-        ).grid(row=0, column=1, padx=10, pady=8, sticky="w")
+        )
+        self.rad_coords_overwrite.grid(row=1, column=1, padx=10, pady=(4, 8), sticky="w")
 
-        ctk.CTkRadioButton(
+        self.rad_coords_unmodified = ctk.CTkRadioButton(
             self.coords_opt_frame,
             text="Only unmodified (skip caches already corrected on web)",
             variable=self.coords_mode_var,
             value=CoordinateUploader.MODE_UNMODIFIED_ONLY
-        ).grid(row=0, column=2, padx=15, pady=8, sticky="w")
+        )
+        self.rad_coords_unmodified.grid(row=1, column=2, padx=15, pady=(4, 8), sticky="w")
 
 
         # Summary / Queue label
@@ -378,6 +403,22 @@ class UltimateApp:
             command=self._stop_operation
         )
         self.btn_coords_stop.pack(side="left", padx=6)
+
+    def _on_coords_options_changed(self):
+        upload_coords = self.var_upload_coords.get()
+        upload_notes = self.var_upload_notes.get()
+
+        # Toggle coordinate mode radio buttons availability
+        radio_state = "normal" if upload_coords else "disabled"
+        self.rad_coords_overwrite.configure(state=radio_state)
+        self.rad_coords_unmodified.configure(state=radio_state)
+        self.lbl_coords_mode.configure(text_color=theme.TEXT_MAIN if upload_coords else theme.TEXT_MUTED)
+
+        # Start button enabled only if at least one checkbox is selected
+        if not upload_coords and not upload_notes:
+            self.btn_coords_start.configure(state="disabled")
+        elif not self.is_running:
+            self.btn_coords_start.configure(state="normal")
 
     # --------------------------------------------------------------------------
     # Tab 2: Bulk Log Caches
@@ -1504,12 +1545,13 @@ class UltimateApp:
 
         count = len(self.loaded_waypoints)
         modified_hints = sum(1 for w in self.loaded_waypoints if w.is_modified_hint)
+        notes_count = sum(1 for w in self.loaded_waypoints if getattr(w, "note", ""))
         src_label = loaded_sources[0] if len(loaded_sources) == 1 else f"{len(loaded_sources)} files"
         self.lbl_coords_summary.configure(
-            text=f"Loaded {count} caches ({modified_hints} with modified coords in GPX){filter_msg}.",
+            text=f"Loaded {count} caches ({count} with coords, {notes_count} with notes){filter_msg}.",
             text_color=theme.ACCENT_GREEN if count > 0 else theme.TEXT_MUTED
         )
-        self.log(f"Loaded {count} waypoints from {src_label}{filter_msg}.", "info")
+        self.log(f"Loaded {count} waypoints from {src_label} ({notes_count} with notes){filter_msg}.", "info")
 
     def _check_active_checkpoint(self):
         # 1. Coordinate upload run checkpoint
@@ -1609,6 +1651,11 @@ class UltimateApp:
         if not self.loaded_waypoints:
             messagebox.showwarning("Upload", "No waypoints loaded. Choose a GPX file first.", parent=self.root)
             return
+        upload_coords = self.var_upload_coords.get()
+        upload_notes = self.var_upload_notes.get()
+        if not upload_coords and not upload_notes:
+            messagebox.showwarning("Upload", "Please select at least one item to upload (Coordinates or Personal notes).", parent=self.root)
+            return
         if self.is_running:
             return
 
@@ -1634,6 +1681,8 @@ class UltimateApp:
                 res = uploader.run(
                     self.loaded_waypoints,
                     mode=mode,
+                    upload_coords=upload_coords,
+                    upload_notes=upload_notes,
                     on_progress=on_progress,
                     on_log=self.log,
                     source_file_path=source_path,

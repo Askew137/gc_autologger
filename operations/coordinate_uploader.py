@@ -34,6 +34,8 @@ class CoordinateUploader:
         self,
         items: List[WaypointItem],
         mode: str = MODE_OVERWRITE_ALL,
+        upload_coords: bool = True,
+        upload_notes: bool = True,
         on_progress: Optional[Callable[[int, int, float, Optional[float], WaypointItem], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None,
         source_file_path: str = "",
@@ -48,6 +50,8 @@ class CoordinateUploader:
         Execute the upload process.
         :param items: List of WaypointItem to process.
         :param mode: OVERWRITE_ALL or UNMODIFIED_ONLY.
+        :param upload_coords: Whether to upload geographic coordinates.
+        :param upload_notes: Whether to upload personal cache notes.
         :param on_progress: callback(current, total, percent, eta_seconds, item)
         :param on_log: callback(message, level='info'|'success'|'warning'|'error')
         :return: Summary dictionary with results.
@@ -85,10 +89,17 @@ class CoordinateUploader:
             else:
                 print(f"[{level.upper()}] {msg}")
 
+        action_parts = []
+        if upload_coords:
+            action_parts.append(f"coordinates ({mode})")
+        if upload_notes:
+            action_parts.append("personal notes")
+        action_desc = " & ".join(action_parts) or "nothing selected"
+
         if resume and already_completed_set:
-            log(f"Resuming coordinate upload: {len(already_completed_set)}/{total} caches already completed in prior run.", "info")
+            log(f"Resuming upload: {len(already_completed_set)}/{total} caches already completed in prior run ({action_desc}).", "info")
         else:
-            log(f"Starting coordinate upload for {total} caches (Mode: {mode})...", "info")
+            log(f"Starting upload for {total} caches ({action_desc})...", "info")
 
         # Verify authentication
         if not self.client.ensure_valid_session():
@@ -153,34 +164,92 @@ class CoordinateUploader:
                         on_progress(idx, total, percent, None, item)
                     continue
 
-            # Mode check: Unmodified only
-            if mode == self.MODE_UNMODIFIED_ONLY:
-                is_modified = self.client.has_modified_coordinates(item.gccode)
-                if is_modified is True:
-                    log(f"{prefix} ⏭️ Skipped: Coordinates are already modified on web.", "warning")
-                    skipped_count += 1
-                    if self.checkpoint_manager:
-                        self.checkpoint_manager.record_coord_item(item.gccode, success=True)
-                    # Progress notification
-                    if on_progress:
-                        percent = (idx / total) * 100
-                        on_progress(idx, total, percent, None, item)
-                    continue
+            # 1. Coordinate upload handling (if enabled)
+            coords_status = None  # None = disabled, "SKIPPED", "SUCCESS", "FAILED"
+            coords_msg = ""
+            if upload_coords:
+                if mode == self.MODE_UNMODIFIED_ONLY:
+                    is_modified = self.client.has_modified_coordinates(item.gccode)
+                    if is_modified is True:
+                        coords_status = "SKIPPED"
+                        coords_msg = "Coordinates already modified on web"
 
-            # Upload coordinates
-            success, message = self.client.upload_coordinates(item.gccode, item.lat, item.lon)
+                if coords_status is None:
+                    c_succ, c_msg = self.client.upload_coordinates(item.gccode, item.lat, item.lon)
+                    if c_succ:
+                        coords_status = "SUCCESS"
+                        coords_msg = c_msg
+                    else:
+                        coords_status = "FAILED"
+                        coords_msg = c_msg
 
-            if success:
+            # 2. Personal note upload handling (if enabled)
+            note_status = None  # None = disabled, "SKIPPED_EMPTY", "SUCCESS", "FAILED"
+            note_msg = ""
+            if upload_notes:
+                if not getattr(item, "note", ""):
+                    note_status = "SKIPPED_EMPTY"
+                    note_msg = "No note in GPX"
+                else:
+                    n_succ, n_msg = self.client.upload_personal_note(item.gccode, item.note)
+                    if n_succ:
+                        note_status = "SUCCESS"
+                        note_msg = n_msg
+                    else:
+                        note_status = "FAILED"
+                        note_msg = n_msg
+
+            # 3. Overall item evaluation
+            has_failed = (coords_status == "FAILED" or note_status == "FAILED")
+            all_skipped = (
+                (coords_status in (None, "SKIPPED"))
+                and (note_status in (None, "SKIPPED_EMPTY"))
+                and coords_status != "SUCCESS"
+                and note_status != "SUCCESS"
+            )
+
+            # Build readable log message
+            log_parts = []
+            if upload_coords:
+                if coords_status == "SUCCESS":
+                    log_parts.append(f"✅ Coords updated ({item.lat:.5f}, {item.lon:.5f})")
+                elif coords_status == "SKIPPED":
+                    log_parts.append("⏭️ Coords already modified")
+                elif coords_status == "FAILED":
+                    log_parts.append(f"❌ Coords failed: {coords_msg}")
+
+            if upload_notes:
+                if note_status == "SUCCESS":
+                    log_parts.append("📝 Note uploaded")
+                elif note_status == "SKIPPED_EMPTY":
+                    log_parts.append("(no note in GPX)")
+                elif note_status == "FAILED":
+                    log_parts.append(f"❌ Note failed: {note_msg}")
+
+            combined_msg = f"{prefix} " + " | ".join(log_parts)
+
+            if has_failed:
+                failed_count += 1
+                fail_reasons = []
+                if coords_status == "FAILED":
+                    fail_reasons.append(f"Coords: {coords_msg}")
+                if note_status == "FAILED":
+                    fail_reasons.append(f"Note: {note_msg}")
+                reason_str = "; ".join(fail_reasons)
+                failed_items.append({"gccode": item.gccode, "reason": reason_str})
+                if self.checkpoint_manager:
+                    self.checkpoint_manager.record_coord_item(item.gccode, success=False, reason=reason_str)
+                log(combined_msg, "error")
+            elif all_skipped:
+                skipped_count += 1
+                if self.checkpoint_manager:
+                    self.checkpoint_manager.record_coord_item(item.gccode, success=True)
+                log(combined_msg, "warning" if coords_status == "SKIPPED" else "info")
+            else:
                 success_count += 1
                 if self.checkpoint_manager:
                     self.checkpoint_manager.record_coord_item(item.gccode, success=True)
-                log(f"{prefix} ✅ Success: {item.lat:.5f}, {item.lon:.5f} ({message})", "success")
-            else:
-                failed_count += 1
-                failed_items.append({"gccode": item.gccode, "reason": message})
-                if self.checkpoint_manager:
-                    self.checkpoint_manager.record_coord_item(item.gccode, success=False, reason=message)
-                log(f"{prefix} ❌ Failed: {message}", "error")
+                log(combined_msg, "success")
 
             # Progress & ETA calculation
             elapsed_item = time.time() - item_start

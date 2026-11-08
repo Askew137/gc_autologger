@@ -6,9 +6,10 @@ Supports standard GPX 1.0/1.1, c:geo, GSAK, GeoGet, Locus, and Mapy.cz exports.
 
 import os
 import re
+import html
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 
 @dataclass
@@ -20,9 +21,24 @@ class WaypointItem:
     cache_type: str = ""
     is_modified_hint: bool = False
     source_file: str = ""
+    note: str = ""
 
     def __repr__(self) -> str:
-        return f"<Waypoint {self.gccode} [{self.lat:.5f}, {self.lon:.5f}] - {self.name}>"
+        note_info = f", note='{self.note[:20]}...'" if self.note else ""
+        return f"<Waypoint {self.gccode} [{self.lat:.5f}, {self.lon:.5f}]{note_info} - {self.name}>"
+
+
+def clean_note_text(text: Optional[str]) -> str:
+    """Clean and unescape personal note text extracted from various GPX formats."""
+    if not text:
+        return ""
+    # Replace HTML break and paragraph tags with newlines
+    cleaned = re.sub(r'(?i)<br\s*/?>', '\n', text)
+    cleaned = re.sub(r'(?i)</p>', '\n', cleaned)
+    # Strip remaining HTML tags
+    cleaned = re.sub(r'<[^>]+>', '', cleaned)
+    cleaned = html.unescape(cleaned)
+    return cleaned.strip()
 
 
 def _strip_namespaces(root: ET.Element) -> None:
@@ -173,7 +189,28 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
             match = re.match(r"^(GC[A-Z0-9]+)", upper_name)
             if match:
                 code = match.group(1)
-                gc_metadata[code] = {"name": cache_name, "cache_type": wpt_type}
+
+                # Extract note from multi-format GPX sources
+                # Priority: <gsak:GcNote> -> GSAK log id="-2" -> short_description (if no long_description)
+                pri_note = ""
+                gc_note = clean_note_text(wpt.findtext(".//GcNote", ""))
+                if gc_note:
+                    pri_note = gc_note
+                else:
+                    for log in wpt.findall(".//log"):
+                        finder = log.findtext("finder", "")
+                        if log.attrib.get("id") == "-2" or (finder and finder.upper() == "GSAK"):
+                            gsak_log_note = clean_note_text(log.findtext("text", ""))
+                            if gsak_log_note:
+                                pri_note = gsak_log_note
+                                break
+                if not pri_note:
+                    short_desc = clean_note_text(wpt.findtext(".//short_description", ""))
+                    long_desc = clean_note_text(wpt.findtext(".//long_description", ""))
+                    if short_desc and not long_desc:
+                        pri_note = short_desc
+
+                gc_metadata[code] = {"name": cache_name, "cache_type": wpt_type, "note": pri_note}
                 if lat is not None and lon is not None:
                     waypoints_map[code] = WaypointItem(
                         gccode=code,
@@ -182,7 +219,8 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
                         name=cache_name,
                         cache_type=wpt_type,
                         is_modified_hint=has_modified_hint,
-                        source_file=base_filename
+                        source_file=base_filename,
+                        note=pri_note
                     )
 
         # 2. Child waypoint of type Final (FN..., FZ..., FH..., FJ..., or Final Location)
@@ -224,6 +262,15 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
                     meta = gc_metadata.get(derived_gc, {})
                     title = meta.get("name") or cache_name
                     ctype = meta.get("cache_type") or "Final Location"
+
+                    # Extract note from child waypoint cmt or desc
+                    cmt_elem = wpt.find("cmt")
+                    child_note = clean_note_text(cmt_elem.text) if cmt_elem is not None and cmt_elem.text else ""
+                    if not child_note:
+                        child_note = clean_note_text(desc_elem.text) if desc_elem is not None and desc_elem.text else ""
+                        if child_note.upper() in ("FINAL LOCATION", "FINAL", "FINÁLKA"):
+                            child_note = ""
+
                     child_finals[derived_gc] = WaypointItem(
                         gccode=derived_gc,
                         lat=lat,
@@ -231,7 +278,8 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
                         name=title,
                         cache_type=ctype,
                         is_modified_hint=True,
-                        source_file=base_filename
+                        source_file=base_filename,
+                        note=child_note
                     )
 
     # If a final child waypoint exists, prefer its coordinates and flag as modified
@@ -242,6 +290,9 @@ def parse_gpx_file(file_path: str) -> List[WaypointItem]:
             waypoints_map[gc_code].is_modified_hint = True
             if not waypoints_map[gc_code].name or waypoints_map[gc_code].name == gc_code:
                 waypoints_map[gc_code].name = final_item.name
+            # Propagate child note if primary note is empty
+            if not waypoints_map[gc_code].note and final_item.note:
+                waypoints_map[gc_code].note = final_item.note
         else:
             waypoints_map[gc_code] = final_item
 
