@@ -168,23 +168,48 @@ def is_webcam_cache(cache_type: Any) -> bool:
     return "webcam" in str(cache_type).strip().lower()
 
 
+def is_traditional_cache(cache_type: Any) -> bool:
+    """Check if cache type represents a Traditional cache (accepts name or ID)."""
+    if cache_type is None:
+        return False
+    if isinstance(cache_type, int) or (isinstance(cache_type, str) and cache_type.isdigit()):
+        return int(cache_type) == 2
+    low = str(cache_type).strip().lower()
+    return "traditional" in low
+
+
+def is_other_cache(cache_type: Any) -> bool:
+    """Check if cache type represents other caches: Mystery, Multi, Wherigo, Letterbox (accepts name or ID)."""
+    if cache_type is None:
+        return False
+    if isinstance(cache_type, int) or (isinstance(cache_type, str) and cache_type.isdigit()):
+        return int(cache_type) in (3, 5, 8, 1858)
+    low = str(cache_type).strip().lower()
+    keywords = ["mystery", "unknown", "multi", "wherigo", "letterbox"]
+    return any(k in low for k in keywords)
+
+
 def is_cache_filtered(
     cache_type: Any,
     omit_virtual: bool = False,
     omit_earth: bool = False,
     omit_events: bool = False,
-    omit_webcam: bool = False
+    omit_webcam: bool = False,
+    omit_traditional: bool = False,
+    omit_other: bool = False
 ) -> bool:
     """Check if cache matches any of the active filter criteria."""
     if cache_type is None:
         return False
-    if omit_virtual and is_virtual_cache(cache_type):
+    if (omit_virtual or omit_webcam) and (is_virtual_cache(cache_type) or is_webcam_cache(cache_type)):
         return True
     if omit_earth and is_earth_cache(cache_type):
         return True
     if omit_events and is_event_cache(cache_type):
         return True
-    if omit_webcam and is_webcam_cache(cache_type):
+    if omit_traditional and is_traditional_cache(cache_type):
+        return True
+    if omit_other and is_other_cache(cache_type):
         return True
     return False
 

@@ -1044,10 +1044,12 @@ class GeocachingClient:
         omit_virtual: bool = False,
         omit_earth: bool = False,
         omit_events: bool = False,
-        omit_webcam: bool = False
+        omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False
     ) -> bool:
         """Check if cache matches any of the enabled omit filters."""
-        if not (omit_virtual or omit_earth or omit_events or omit_webcam):
+        if not (omit_virtual or omit_earth or omit_events or omit_webcam or omit_traditional or omit_other):
             return False
         data = self.get_cache_details(gc_code)
         if not data:
@@ -1055,13 +1057,15 @@ class GeocachingClient:
         type_id = data.get("geocacheType")
         type_name = str(data.get("typeName", "")).lower()
 
-        if omit_virtual and (type_id in [4, 12] or "virtual" in type_name or "locationless" in type_name):
+        if (omit_virtual or omit_webcam) and (type_id in [4, 11, 12] or any(k in type_name for k in ["virtual", "locationless", "webcam"])):
             return True
         if omit_earth and (type_id == 137 or "earthcache" in type_name or "earth cache" in type_name):
             return True
         if omit_events and (type_id in [6, 13, 453, 7005, 3653, 3774, 4738, 1304] or any(k in type_name for k in ["event", "cito", "celebration", "block party"])):
             return True
-        if omit_webcam and (type_id == 11 or "webcam" in type_name):
+        if omit_traditional and (type_id == 2 or "traditional" in type_name):
+            return True
+        if omit_other and (type_id in [3, 5, 8, 1858] or any(k in type_name for k in ["mystery", "unknown", "multi", "wherigo", "letterbox"])):
             return True
         return False
 

@@ -46,6 +46,8 @@ class CoordinateUploader:
         omit_earth: bool = False,
         omit_events: bool = False,
         omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False,
         omit_virtual_and_earth: bool = False,
         geodeep_config: Optional[Any] = None
     ) -> Dict[str, Any]:
@@ -147,16 +149,42 @@ class CoordinateUploader:
                 continue
 
             # Granular cache type filter
-            should_filter = (omit_virtual or omit_earth or omit_events or omit_webcam or omit_virtual_and_earth)
+            should_filter = (
+                omit_virtual
+                or omit_earth
+                or omit_events
+                or omit_webcam
+                or omit_traditional
+                or omit_other
+                or omit_virtual_and_earth
+            )
             if should_filter:
                 ov = omit_virtual or omit_virtual_and_earth
                 oe = omit_earth or omit_virtual_and_earth
                 oev = omit_events
                 ow = omit_webcam or omit_virtual_and_earth
+                ot = omit_traditional
+                o_oth = omit_other
                 if item.cache_type:
-                    is_filtered = is_cache_filtered(item.cache_type, omit_virtual=ov, omit_earth=oe, omit_events=oev, omit_webcam=ow)
+                    is_filtered = is_cache_filtered(
+                        item.cache_type,
+                        omit_virtual=ov,
+                        omit_earth=oe,
+                        omit_events=oev,
+                        omit_webcam=ow,
+                        omit_traditional=ot,
+                        omit_other=o_oth
+                    )
                 else:
-                    is_filtered = self.client.is_cache_filtered(item.gccode, omit_virtual=ov, omit_earth=oe, omit_events=oev, omit_webcam=ow)
+                    is_filtered = self.client.is_cache_filtered(
+                        item.gccode,
+                        omit_virtual=ov,
+                        omit_earth=oe,
+                        omit_events=oev,
+                        omit_webcam=ow,
+                        omit_traditional=ot,
+                        omit_other=o_oth
+                    )
 
                 if is_filtered:
                     log(f"{prefix} ⏭️ Skipped: Cache type filtered out.", "info")

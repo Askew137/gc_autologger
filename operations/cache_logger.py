@@ -46,6 +46,8 @@ class CacheLogger:
         omit_earth: bool = False,
         omit_events: bool = False,
         omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False,
         omit_virtual_and_earth: bool = False,
         checkpoint_manager: Optional[Any] = None,
         resume: bool = False,
@@ -174,13 +176,23 @@ class CacheLogger:
                 continue
 
             # Check cache type filtering
-            should_filter = (omit_virtual or omit_earth or omit_events or omit_webcam or omit_virtual_and_earth)
+            should_filter = (
+                omit_virtual
+                or omit_earth
+                or omit_events
+                or omit_webcam
+                or omit_traditional
+                or omit_other
+                or omit_virtual_and_earth
+            )
             if should_filter and self.client.is_cache_filtered(
                 clean_code,
                 omit_virtual=omit_virtual or omit_virtual_and_earth,
                 omit_earth=omit_earth or omit_virtual_and_earth,
                 omit_events=omit_events,
-                omit_webcam=omit_webcam
+                omit_webcam=omit_webcam,
+                omit_traditional=omit_traditional,
+                omit_other=omit_other
             ):
                 skipped_filter_count += 1
                 log(f"{prefix} ⏭️ Skipped: Cache type filtered out", "info")

@@ -57,6 +57,19 @@ class FilterConfig:
     omit_earthcache: bool = False
     omit_events: bool = False
     omit_webcam: bool = False
+    omit_traditional: bool = False
+    omit_other: bool = False
+
+    @property
+    def has_any_enabled(self) -> bool:
+        return (
+            self.omit_virtual
+            or self.omit_earthcache
+            or self.omit_events
+            or self.omit_webcam
+            or self.omit_traditional
+            or self.omit_other
+        )
 
     @property
     def omit_earth(self) -> bool:
@@ -263,11 +276,16 @@ class ConfigManager:
         omit_ev = bool(raw_filters.get("omit_events", False))
         omit_wc = bool(raw_filters.get("omit_webcam", legacy_val))
 
+        omit_trad = bool(raw_filters.get("omit_traditional", False))
+        omit_oth = bool(raw_filters.get("omit_other", False))
+
         filters = FilterConfig(
             omit_virtual=omit_v,
             omit_earthcache=omit_ec,
             omit_events=omit_ev,
-            omit_webcam=omit_wc
+            omit_webcam=omit_wc,
+            omit_traditional=omit_trad,
+            omit_other=omit_oth
         )
 
         # GUI

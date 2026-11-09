@@ -27,7 +27,11 @@
     "auto_relogin": true
   },
   "filters": {
-    "omit_virtual_earth_webcam": false
+    "omit_virtual": false,
+    "omit_earthcache": false,
+    "omit_events": false,
+    "omit_traditional": false,
+    "omit_other": false
   },
   "geodeep_notes": {
     "include_date": false,

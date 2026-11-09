@@ -30,7 +30,9 @@ class UserLogCopier:
         omit_virtual: bool = False,
         omit_earth: bool = False,
         omit_events: bool = False,
-        omit_webcam: bool = False
+        omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False
     ) -> List[str]:
         """
         Fetch all GC codes logged by target user on the specified date or date range (inclusive).
@@ -98,19 +100,22 @@ class UserLogCopier:
         if target_password:
             http_result = self._fetch_via_authenticated_http(
                 target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log,
-                omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
+                omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam,
+                omit_traditional=omit_traditional, omit_other=omit_other
             )
             if http_result is not None:
                 gc_codes = http_result
             else:
                 gc_codes = self._fetch_via_browser(
                     target_username, target_password, start_iso, end_iso, all_iso_dates, possible_date_formats_list, log,
-                    omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
+                    omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam,
+                    omit_traditional=omit_traditional, omit_other=omit_other
                 )
         else:
             gc_codes = self._fetch_via_public_api(
                 target_username, start_iso, end_iso, log,
-                omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam
+                omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam,
+                omit_traditional=omit_traditional, omit_other=omit_other
             )
 
         return gc_codes or []
@@ -128,6 +133,8 @@ class UserLogCopier:
         omit_earth: bool = False,
         omit_events: bool = False,
         omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False,
     ) -> Optional[List[str]]:
         """Fast direct HTTP log reader using target user's session."""
         try:
@@ -167,7 +174,9 @@ class UserLogCopier:
                             omit_virtual=omit_virtual,
                             omit_earth=omit_earth,
                             omit_events=omit_events,
-                            omit_webcam=omit_webcam
+                            omit_webcam=omit_webcam,
+                            omit_traditional=omit_traditional,
+                            omit_other=omit_other
                         ):
                             continue
 
@@ -216,6 +225,8 @@ class UserLogCopier:
         omit_earth: bool = False,
         omit_events: bool = False,
         omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False,
     ) -> List[str]:
         """Fetch logs by logging in and scrolling /my/logs.aspx using Playwright."""
         try:
@@ -325,7 +336,15 @@ class UserLogCopier:
                         t_info = r.get('typeInfo', '')
                         wpt_m = re.search(r'/wpttypes/(?:png/)?(\d+)\.', t_info)
                         c_type = int(wpt_m.group(1)) if wpt_m else t_info
-                        if is_cache_filtered(c_type, omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam):
+                        if is_cache_filtered(
+                            c_type,
+                            omit_virtual=omit_virtual,
+                            omit_earth=omit_earth,
+                            omit_events=omit_events,
+                            omit_webcam=omit_webcam,
+                            omit_traditional=omit_traditional,
+                            omit_other=omit_other
+                        ):
                             continue
 
                         d_text = r['dateText']
@@ -390,6 +409,8 @@ class UserLogCopier:
         omit_earth: bool = False,
         omit_events: bool = False,
         omit_webcam: bool = False,
+        omit_traditional: bool = False,
+        omit_other: bool = False,
     ) -> List[str]:
         """Fetch logs for target user on specific date or date range using Geocaching search API."""
         try:
@@ -437,7 +458,15 @@ class UserLogCopier:
                     code = item.get("code")
                     if start_iso <= date_part <= end_iso:
                         ctype = item.get("geocacheType")
-                        if is_cache_filtered(ctype, omit_virtual=omit_virtual, omit_earth=omit_earth, omit_events=omit_events, omit_webcam=omit_webcam):
+                        if is_cache_filtered(
+                            ctype,
+                            omit_virtual=omit_virtual,
+                            omit_earth=omit_earth,
+                            omit_events=omit_events,
+                            omit_webcam=omit_webcam,
+                            omit_traditional=omit_traditional,
+                            omit_other=omit_other
+                        ):
                             continue
                         if code and code not in matched_codes:
                             matched_codes.append(code)

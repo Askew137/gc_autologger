@@ -1028,10 +1028,10 @@ class UltimateApp:
         filter_content = ctk.CTkFrame(filter_sec, fg_color="transparent")
         filter_content.pack(fill="x", padx=12, pady=(4, 12))
 
-        self.var_omit_virtual = ctk.BooleanVar(value=self.config.filters.omit_virtual)
+        self.var_omit_virtual = ctk.BooleanVar(value=self.config.filters.omit_virtual or self.config.filters.omit_webcam)
         self.chk_omit_virtual = ctk.CTkCheckBox(
             filter_content,
-            text="Omit Virtual caches (Virtual, Locationless)",
+            text="Omit Virtual caches (Virtual, Locationless, Webcam)",
             font=ctk.CTkFont(size=13),
             variable=self.var_omit_virtual,
             command=self._on_toggle_filters
@@ -1058,15 +1058,25 @@ class UltimateApp:
         )
         self.chk_omit_events.pack(anchor="w", padx=4, pady=3)
 
-        self.var_omit_webcam = ctk.BooleanVar(value=self.config.filters.omit_webcam)
-        self.chk_omit_webcam = ctk.CTkCheckBox(
+        self.var_omit_traditional = ctk.BooleanVar(value=self.config.filters.omit_traditional)
+        self.chk_omit_traditional = ctk.CTkCheckBox(
             filter_content,
-            text="Omit Webcam caches",
+            text="Omit Traditional caches",
             font=ctk.CTkFont(size=13),
-            variable=self.var_omit_webcam,
+            variable=self.var_omit_traditional,
             command=self._on_toggle_filters
         )
-        self.chk_omit_webcam.pack(anchor="w", padx=4, pady=3)
+        self.chk_omit_traditional.pack(anchor="w", padx=4, pady=3)
+
+        self.var_omit_other = ctk.BooleanVar(value=self.config.filters.omit_other)
+        self.chk_omit_other = ctk.CTkCheckBox(
+            filter_content,
+            text="Omit Other caches (Mystery, Multi, Wherigo, Letterbox)",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_omit_other,
+            command=self._on_toggle_filters
+        )
+        self.chk_omit_other.pack(anchor="w", padx=4, pady=3)
 
         ctk.CTkLabel(
             filter_content,
@@ -1635,7 +1645,7 @@ class UltimateApp:
         self.loaded_waypoints = list(all_waypoints_map.values())
 
         f_cfg = self.config.filters
-        if f_cfg.omit_virtual or f_cfg.omit_earth or f_cfg.omit_events or f_cfg.omit_webcam:
+        if f_cfg.has_any_enabled:
             orig_count = len(self.loaded_waypoints)
             self.loaded_waypoints = [
                 w for w in self.loaded_waypoints
@@ -1644,7 +1654,9 @@ class UltimateApp:
                     omit_virtual=f_cfg.omit_virtual,
                     omit_earth=f_cfg.omit_earth,
                     omit_events=f_cfg.omit_events,
-                    omit_webcam=f_cfg.omit_webcam
+                    omit_webcam=f_cfg.omit_webcam,
+                    omit_traditional=f_cfg.omit_traditional,
+                    omit_other=f_cfg.omit_other
                 )
             ]
             omitted = orig_count - len(self.loaded_waypoints)
@@ -1805,6 +1817,8 @@ class UltimateApp:
                     omit_earth=f_cfg.omit_earth,
                     omit_events=f_cfg.omit_events,
                     omit_webcam=f_cfg.omit_webcam,
+                    omit_traditional=f_cfg.omit_traditional,
+                    omit_other=f_cfg.omit_other,
                     geodeep_config=self.config.geodeep_notes
                 )
                 self.root.after(0, self._reset_controls)
@@ -1843,7 +1857,7 @@ class UltimateApp:
             for f in files:
                 items = parse_file(f)
                 orig_c = len(items)
-                if f_cfg.omit_virtual or f_cfg.omit_earth or f_cfg.omit_events or f_cfg.omit_webcam:
+                if f_cfg.has_any_enabled:
                     items = [
                         it for it in items
                         if not is_cache_filtered(
@@ -1851,7 +1865,9 @@ class UltimateApp:
                             omit_virtual=f_cfg.omit_virtual,
                             omit_earth=f_cfg.omit_earth,
                             omit_events=f_cfg.omit_events,
-                            omit_webcam=f_cfg.omit_webcam
+                            omit_webcam=f_cfg.omit_webcam,
+                            omit_traditional=f_cfg.omit_traditional,
+                            omit_other=f_cfg.omit_other
                         )
                     ]
                     total_omitted += (orig_c - len(items))
@@ -2044,7 +2060,7 @@ class UltimateApp:
 
                     if target == "bulk":
                         # Filter by active types
-                        if f_cfg.omit_virtual or f_cfg.omit_earth or f_cfg.omit_events or f_cfg.omit_webcam:
+                        if f_cfg.has_any_enabled:
                             filtered_caches = []
                             for c in caches:
                                 c_type = c.get("geocacheType")
@@ -2055,7 +2071,9 @@ class UltimateApp:
                                     omit_virtual=f_cfg.omit_virtual,
                                     omit_earth=f_cfg.omit_earth,
                                     omit_events=f_cfg.omit_events,
-                                    omit_webcam=f_cfg.omit_webcam
+                                    omit_webcam=f_cfg.omit_webcam,
+                                    omit_traditional=f_cfg.omit_traditional,
+                                    omit_other=f_cfg.omit_other
                                 )
                                 if not is_filt and t_id is not None:
                                     is_filt = is_cache_filtered(
@@ -2063,7 +2081,9 @@ class UltimateApp:
                                         omit_virtual=f_cfg.omit_virtual,
                                         omit_earth=f_cfg.omit_earth,
                                         omit_events=f_cfg.omit_events,
-                                        omit_webcam=f_cfg.omit_webcam
+                                        omit_webcam=f_cfg.omit_webcam,
+                                        omit_traditional=f_cfg.omit_traditional,
+                                        omit_other=f_cfg.omit_other
                                     )
                                 if not is_filt:
                                     filtered_caches.append(c)
@@ -2296,6 +2316,8 @@ class UltimateApp:
                     omit_earth=f_cfg.omit_earth,
                     omit_events=f_cfg.omit_events,
                     omit_webcam=f_cfg.omit_webcam,
+                    omit_traditional=f_cfg.omit_traditional,
+                    omit_other=f_cfg.omit_other,
                     checkpoint_manager=self.checkpoint_mgr,
                     resume=resume,
                     on_progress=on_progress,
@@ -2350,7 +2372,9 @@ class UltimateApp:
                 omit_virtual=f_cfg.omit_virtual,
                 omit_earth=f_cfg.omit_earth,
                 omit_events=f_cfg.omit_events,
-                omit_webcam=f_cfg.omit_webcam
+                omit_webcam=f_cfg.omit_webcam,
+                omit_traditional=f_cfg.omit_traditional,
+                omit_other=f_cfg.omit_other
             )
             if codes:
                 self.root.after(0, lambda: self._insert_copied_codes(codes))
@@ -2806,15 +2830,18 @@ class UltimateApp:
 
     def _on_toggle_filters(self):
         self.config.filters.omit_virtual = self.var_omit_virtual.get()
+        self.config.filters.omit_webcam = self.var_omit_virtual.get()
         self.config.filters.omit_earthcache = self.var_omit_earth.get()
         self.config.filters.omit_events = self.var_omit_events.get()
-        self.config.filters.omit_webcam = self.var_omit_webcam.get()
+        self.config.filters.omit_traditional = self.var_omit_traditional.get()
+        self.config.filters.omit_other = self.var_omit_other.get()
         self.config_mgr.save()
         self.log(
-            f"Filters updated: Virtual={self.config.filters.omit_virtual}, "
+            f"Filters updated: Virtual/Webcam={self.config.filters.omit_virtual}, "
             f"Earth={self.config.filters.omit_earthcache}, "
             f"Events={self.config.filters.omit_events}, "
-            f"Webcam={self.config.filters.omit_webcam}.",
+            f"Traditional={self.config.filters.omit_traditional}, "
+            f"Other={self.config.filters.omit_other}.",
             "info"
         )
 
@@ -2858,6 +2885,14 @@ class UltimateApp:
             self.safety.max_delay = self.config.safety.max_delay_seconds
             self.safety.breather_interval = self.config.safety.breather_interval
             self.safety.breather_duration = self.config.safety.breather_duration_seconds
+
+            if hasattr(self, "var_omit_virtual"):
+                self.config.filters.omit_virtual = self.var_omit_virtual.get()
+                self.config.filters.omit_webcam = self.var_omit_virtual.get()
+                self.config.filters.omit_earthcache = self.var_omit_earth.get()
+                self.config.filters.omit_events = self.var_omit_events.get()
+                self.config.filters.omit_traditional = self.var_omit_traditional.get()
+                self.config.filters.omit_other = self.var_omit_other.get()
 
             if hasattr(self, "var_geodeep_date"):
                 self.config.geodeep_notes.include_date = self.var_geodeep_date.get()
