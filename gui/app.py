@@ -1429,11 +1429,31 @@ class UltimateApp:
         self.ai_default_source_combo.set(source_val)
         self.ai_default_source_combo.grid(row=4, column=1, padx=6, pady=4, sticky="w")
 
+        # Thinking Budget Slider
+        ctk.CTkLabel(ai_grid, text="Thinking budget:", font=ctk.CTkFont(weight="bold")).grid(row=5, column=0, padx=6, pady=4, sticky="w")
+        tb_box = ctk.CTkFrame(ai_grid, fg_color="transparent")
+        tb_box.grid(row=5, column=1, padx=6, pady=4, sticky="w")
+
+        init_budget = getattr(self.config.ai, "thinking_budget", 1024)
+        self.ai_thinking_budget_slider = ctk.CTkSlider(
+            tb_box,
+            from_=0,
+            to=8192,
+            number_of_steps=64,
+            width=220,
+            command=self._on_thinking_budget_changed
+        )
+        self.ai_thinking_budget_slider.set(init_budget)
+        self.ai_thinking_budget_slider.pack(side="left")
+
+        self.lbl_thinking_budget = ctk.CTkLabel(tb_box, text=self._format_thinking_budget(init_budget), font=ctk.CTkFont(size=12))
+        self.lbl_thinking_budget.pack(side="left", padx=10)
+
         # System Prompt
-        ctk.CTkLabel(ai_grid, text="System Prompt:", font=ctk.CTkFont(weight="bold")).grid(row=5, column=0, padx=6, pady=4, sticky="nw")
+        ctk.CTkLabel(ai_grid, text="System Prompt:", font=ctk.CTkFont(weight="bold")).grid(row=6, column=0, padx=6, pady=4, sticky="nw")
         self.ai_prompt_txt = ctk.CTkTextbox(ai_grid, width=460, height=90, wrap="word")
         self.ai_prompt_txt.insert("1.0", self.config.ai.system_prompt)
-        self.ai_prompt_txt.grid(row=5, column=1, padx=6, pady=4, sticky="w")
+        self.ai_prompt_txt.grid(row=6, column=1, padx=6, pady=4, sticky="w")
 
         # Test Connection button
         btn_ai_row = ctk.CTkFrame(ai_sec, fg_color="transparent")
@@ -3288,6 +3308,26 @@ class UltimateApp:
             if not self.ai_model_entry.get().strip() or "gemini" in self.ai_model_entry.get().lower():
                 self.ai_model_entry.delete(0, "end")
                 self.ai_model_entry.insert(0, "gpt-4o-mini")
+        if hasattr(self, "lbl_thinking_budget") and hasattr(self, "ai_thinking_budget_slider"):
+            self._on_thinking_budget_changed(self.ai_thinking_budget_slider.get())
+
+    def _format_thinking_budget(self, val: float) -> str:
+        tokens = int(round(val / 128.0) * 128)
+        if tokens <= 0:
+            return "0 (Vypnuto / Bleskové ~1s)"
+        elif tokens <= 512:
+            return f"{tokens} tok. (Rychlé ~2-3s)"
+        elif tokens <= 1024:
+            return f"{tokens} tok. (Vyvážené ~4s)"
+        elif tokens <= 4096:
+            return f"{tokens} tok. (Hluboké ~6-10s)"
+        else:
+            return f"{tokens} tok. (Maximum ~15s+)"
+
+    def _on_thinking_budget_changed(self, val: float):
+        tokens = int(round(val / 128.0) * 128)
+        if hasattr(self, "lbl_thinking_budget"):
+            self.lbl_thinking_budget.configure(text=self._format_thinking_budget(tokens))
 
     def _toggle_ai_key_visibility(self):
         if self.ai_key_entry.cget("show") == "*":
@@ -3303,6 +3343,7 @@ class UltimateApp:
         base_url = self.ai_base_url_entry.get().strip()
         model = self.ai_model_entry.get().strip()
         api_key = self.ai_key_entry.get().strip()
+        budget = int(round(self.ai_thinking_budget_slider.get() / 128.0) * 128) if hasattr(self, "ai_thinking_budget_slider") else 1024
         prompt = self.ai_prompt_txt.get("1.0", "end").strip()
 
         if not api_key:
@@ -3315,6 +3356,7 @@ class UltimateApp:
             base_url=base_url,
             model=model,
             api_key=api_key,
+            thinking_budget=budget,
             system_prompt=prompt
         )
 
@@ -3608,6 +3650,9 @@ class UltimateApp:
                 self.config.ai.model = self.ai_model_entry.get().strip()
                 self.config.ai.api_key = self.ai_key_entry.get().strip()
                 self.config.ai.enabled = bool(self.config.ai.api_key)
+                if hasattr(self, "ai_thinking_budget_slider"):
+                    tokens = int(round(self.ai_thinking_budget_slider.get() / 128.0) * 128)
+                    self.config.ai.thinking_budget = max(0, tokens)
                 self.config.ai.system_prompt = self.ai_prompt_txt.get("1.0", "end").strip()
                 self.config.default_answer_source = self.ai_default_source_combo.get().strip().lower()
 

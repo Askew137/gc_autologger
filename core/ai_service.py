@@ -63,6 +63,12 @@ class AiService:
             if provider == "gemini":
                 model_name = config.model.strip() or "gemini-2.5-flash"
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={config.api_key.strip()}"
+                
+                budget = getattr(config, "thinking_budget", 1024)
+                gen_config = {"temperature": 0.2}
+                if budget is not None and budget >= 0:
+                    gen_config["thinkingConfig"] = {"thinkingBudget": int(budget)}
+
                 payload = {
                     "systemInstruction": {
                         "parts": [{"text": config.system_prompt}]
@@ -70,14 +76,15 @@ class AiService:
                     "contents": [{
                         "parts": [{"text": user_content}]
                     }],
-                    "generationConfig": {
-                        "temperature": 0.2,
-                        "thinkingConfig": {
-                            "thinkingBudget": 1024
-                        }
-                    }
+                    "generationConfig": gen_config
                 }
                 resp = requests.post(url, json=payload, timeout=timeout)
+                if resp.status_code != 200:
+                    # If model doesn't support thinkingConfig, gracefully retry without it
+                    if "thinking" in resp.text.lower() and "thinkingConfig" in gen_config:
+                        del gen_config["thinkingConfig"]
+                        resp = requests.post(url, json=payload, timeout=timeout)
+
                 if resp.status_code != 200:
                     try:
                         err_json = resp.json()
@@ -118,8 +125,17 @@ class AiService:
                         {"role": "system", "content": config.system_prompt},
                         {"role": "user", "content": user_content}
                     ],
-                    "temperature": 0.2
+                    "temperature": 0.2,
+                    "max_tokens": 1500
                 }
+                budget = getattr(config, "thinking_budget", 1024)
+                if any(model_name.lower().startswith(p) for p in ("o1", "o3", "o4")):
+                    if budget <= 0:
+                        payload["reasoning_effort"] = "low"
+                    elif budget > 2048:
+                        payload["reasoning_effort"] = "high"
+                    else:
+                        payload["reasoning_effort"] = "medium"
 
                 resp = requests.post(endpoint, headers=headers, json=payload, timeout=timeout)
                 if resp.status_code != 200:

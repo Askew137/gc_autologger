@@ -123,6 +123,7 @@ class AiConfig:
     api_key: str = ""
     model: str = "gpt-4o-mini"
     base_url: str = ""
+    thinking_budget: int = 1024
     system_prompt: str = (
         "Jsi zkušený asistent pro EarthCache a Virtual geocaching v České republice.\n"
         "Tvým úkolem je na základě listingu (a případné poznámky hráče) připravit velmi stručné, věcné odpovědi na otázky pro ownera keše.\n"
@@ -364,6 +365,7 @@ class ConfigManager:
             api_key=str(raw_ai.get("api_key", "")),
             model=str(raw_ai.get("model", "gpt-4o-mini")),
             base_url=str(raw_ai.get("base_url", "")),
+            thinking_budget=int(raw_ai.get("thinking_budget", 1024)),
             system_prompt=str(raw_ai.get("system_prompt", AiConfig().system_prompt))
         )
 
