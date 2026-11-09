@@ -3341,7 +3341,7 @@ class UltimateApp:
         current_val = self.ai_thinking_budget_slider.get()
         if max_val == 0:
             self.ai_thinking_budget_slider.configure(state="disabled")
-            self.lbl_thinking_budget.configure(text="Nepodporováno (model bez uvažování)")
+            self.lbl_thinking_budget.configure(text="Not supported (non-thinking model)")
         else:
             self.ai_thinking_budget_slider.configure(state="normal", from_=0, to=max_val, number_of_steps=steps)
             if current_val > max_val:
@@ -3351,17 +3351,17 @@ class UltimateApp:
     def _format_thinking_budget(self, val: float) -> str:
         tokens = int(round(val / 128.0) * 128)
         if tokens <= 0:
-            return "0 (Vypnuto / Bleskové ~1s)"
+            return "0 (Disabled / Instant ~1s)"
         elif tokens <= 512:
-            return f"{tokens} tok. (Rychlé ~2-3s)"
+            return f"{tokens} tok. (Fast ~2-3s)"
         elif tokens <= 1024:
-            return f"{tokens} tok. (Vyvážené ~4s)"
+            return f"{tokens} tok. (Balanced ~4s)"
         elif tokens <= 4096:
-            return f"{tokens} tok. (Hluboké ~6-10s)"
+            return f"{tokens} tok. (Deep thinking ~6-10s)"
         elif tokens <= 8192:
-            return f"{tokens} tok. (Maximum pro Flash ~15s+)"
+            return f"{tokens} tok. (Max for Flash ~15s+)"
         else:
-            return f"{tokens} tok. (Pro model / Hluboké ~20s+)"
+            return f"{tokens} tok. (Pro model / Deep ~20s+)"
 
     def _on_thinking_budget_changed(self, val: float):
         tokens = int(round(val / 128.0) * 128)
