@@ -17,7 +17,9 @@ class AiService:
         listing: str,
         note: str,
         gc_code: str = "",
-        cache_name: str = ""
+        cache_name: str = "",
+        prompt_name: Optional[str] = None,
+        override_prompt: Optional[str] = None
     ) -> Tuple[bool, str]:
         """
         Generate concise answers from cache listing and player note using the configured AI provider.
@@ -37,10 +39,11 @@ class AiService:
             f"Formátuj pouze jako číslovaný seznam: 1) ... 2) ... 3) ... Bez zdvořilostních frází."
         )
 
-        return AiService._call_provider(config, user_content, timeout=120)
+        active_sp = override_prompt or config.get_system_prompt(prompt_name)
+        return AiService._call_provider(config, user_content, timeout=120, system_prompt=active_sp)
 
     @staticmethod
-    def test_connection(config: AiConfig) -> Tuple[bool, str]:
+    def test_connection(config: AiConfig, prompt_name: Optional[str] = None) -> Tuple[bool, str]:
         """
         Send a lightweight ping to verify that the API key and endpoint are working.
         For Gemini, also queries model metadata to inspect thinking support.
@@ -65,15 +68,17 @@ class AiService:
                 pass
 
         test_prompt = "Odpověz jedním slovem: OK"
-        ok, res = AiService._call_provider(config, test_prompt, timeout=30)
+        active_sp = config.get_system_prompt(prompt_name)
+        ok, res = AiService._call_provider(config, test_prompt, timeout=30, system_prompt=active_sp)
         if ok:
             clean_res = res.replace("\n", " ").strip()
             return True, f"Connection successful! Response: '{clean_res[:60]}'"
         return False, res
 
     @staticmethod
-    def _call_provider(config: AiConfig, user_content: str, timeout: int = 120) -> Tuple[bool, str]:
+    def _call_provider(config: AiConfig, user_content: str, timeout: int = 120, system_prompt: Optional[str] = None) -> Tuple[bool, str]:
         provider = (config.provider or "openai").lower().strip()
+        active_sp = system_prompt or config.get_system_prompt()
 
         try:
             if provider == "gemini":
@@ -87,7 +92,7 @@ class AiService:
 
                 payload = {
                     "systemInstruction": {
-                        "parts": [{"text": config.system_prompt}]
+                        "parts": [{"text": active_sp}]
                     },
                     "contents": [{
                         "parts": [{"text": user_content}]
@@ -138,7 +143,7 @@ class AiService:
                 payload = {
                     "model": model_name,
                     "messages": [
-                        {"role": "system", "content": config.system_prompt},
+                        {"role": "system", "content": active_sp},
                         {"role": "user", "content": user_content}
                     ],
                     "temperature": 0.2,

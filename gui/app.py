@@ -22,7 +22,10 @@ except ImportError:
     ctk = None
     CTK_AVAILABLE = False
 
-from core.config import ConfigManager, AccountConfig, AnswerTemplate, AiConfig, get_base_dir, get_bundle_dir
+from core.config import (
+    ConfigManager, AccountConfig, AnswerTemplate, AiConfig,
+    SystemPromptConfig, get_default_system_prompts, get_base_dir, get_bundle_dir
+)
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
@@ -82,6 +85,9 @@ class UltimateApp:
         self._drag_tmpl_idx: Optional[int] = None
         self._tmpl_rows: List[tuple] = []
         self._ans_tmpl_rows: List[tuple] = []
+        self._drag_ans_tmpl_idx: Optional[int] = None
+        self._sys_prompt_rows: List[tuple] = []
+        self._drag_sys_prompt_idx: Optional[int] = None
 
         # Send concepts & answers approval state
         self.var_send_answers = ctk.BooleanVar(value=self.config.send_answers)
@@ -1452,11 +1458,24 @@ class UltimateApp:
         self.lbl_thinking_budget.pack(side="left", padx=10)
         self._update_thinking_budget_slider_limits()
 
-        # System Prompt
-        ctk.CTkLabel(ai_grid, text="System Prompt:", font=ctk.CTkFont(weight="bold")).grid(row=6, column=0, padx=6, pady=4, sticky="nw")
-        self.ai_prompt_txt = ctk.CTkTextbox(ai_grid, width=460, height=90, wrap="word")
-        self.ai_prompt_txt.insert("1.0", self.config.ai.system_prompt)
-        self.ai_prompt_txt.grid(row=6, column=1, padx=6, pady=4, sticky="w")
+        # System Prompts management
+        ctk.CTkLabel(ai_sec, text="AI System Prompts (Multilingual / Custom):", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12, 4))
+        ctk.CTkLabel(
+            ai_sec,
+            text="Manage system prompts for different languages. You can assign a specific prompt to each Answer Template.",
+            font=ctk.CTkFont(size=12),
+            text_color=theme.TEXT_MUTED
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+
+        self.sys_prompt_display_frame = ctk.CTkFrame(ai_sec, fg_color="transparent")
+        self.sys_prompt_display_frame.pack(fill="x", padx=12, pady=4)
+        self._refresh_sys_prompts_view()
+
+        add_sys_prompt_frame = ctk.CTkFrame(ai_sec, fg_color="transparent")
+        add_sys_prompt_frame.pack(fill="x", padx=12, pady=(4, 10))
+
+        ctk.CTkButton(add_sys_prompt_frame, text="+ Add system prompt", width=160, command=self._on_add_system_prompt).pack(side="left", padx=4)
+        ctk.CTkButton(add_sys_prompt_frame, text="↺ Reset default prompts", width=160, fg_color=theme.CARD_BORDER, hover_color=theme.CARD_BG, command=self._on_reset_system_prompts).pack(side="left", padx=4)
 
         # Test Connection button
         btn_ai_row = ctk.CTkFrame(ai_sec, fg_color="transparent")
@@ -3143,15 +3162,29 @@ class UltimateApp:
             row.pack(fill="x", pady=2)
             self._ans_tmpl_rows.append((row, idx))
 
+            # Drag handle
+            drag_handle = ctk.CTkLabel(row, text=" ☰ ", font=ctk.CTkFont(size=14, weight="bold"), text_color=theme.TEXT_MUTED, cursor="fleur")
+            drag_handle.pack(side="left", padx=(8, 4))
+
             display_snip = tmpl.text.replace("\n", " ").strip()
-            if len(display_snip) > 50:
-                display_snip = display_snip[:47] + "..."
+            if len(display_snip) > 42:
+                display_snip = display_snip[:39] + "..."
 
             lbl_name = ctk.CTkLabel(row, text=f"#{idx + 1}: {tmpl.name}", font=ctk.CTkFont(weight="bold"))
-            lbl_name.pack(side="left", padx=(10, 4), pady=6)
+            lbl_name.pack(side="left", padx=(4, 4), pady=6)
+
+            if getattr(tmpl, "ai_prompt", ""):
+                lbl_badge = ctk.CTkLabel(row, text=f"[{tmpl.ai_prompt}]", font=ctk.CTkFont(size=11, weight="bold"), text_color=theme.ACCENT_BLUE)
+                lbl_badge.pack(side="left", padx=4, pady=6)
 
             lbl_preview = ctk.CTkLabel(row, text=f"({display_snip})", font=ctk.CTkFont(size=11), text_color=theme.TEXT_MUTED)
             lbl_preview.pack(side="left", padx=4, pady=6)
+
+            # Bind drag & drop
+            for w in (drag_handle, lbl_name):
+                w.bind("<Button-1>", lambda e, i=idx: self._on_ans_tmpl_drag_start(e, i))
+                w.bind("<B1-Motion>", self._on_ans_tmpl_drag_motion)
+                w.bind("<ButtonRelease-1>", self._on_ans_tmpl_drag_release)
 
             del_btn = ctk.CTkButton(
                 row,
@@ -3175,6 +3208,53 @@ class UltimateApp:
             )
             edit_btn.pack(side="right", padx=4)
 
+    def _on_ans_tmpl_drag_start(self, event, idx: int):
+        self._drag_ans_tmpl_idx = idx
+        if 0 <= idx < len(self._ans_tmpl_rows):
+            row_frame, _ = self._ans_tmpl_rows[idx]
+            row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+
+    def _on_ans_tmpl_drag_motion(self, event):
+        if self._drag_ans_tmpl_idx is None:
+            return
+        target_idx = self._find_ans_tmpl_drop_target(event.y_root)
+        for row_frame, i in self._ans_tmpl_rows:
+            if i == self._drag_ans_tmpl_idx:
+                row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+            elif i == target_idx:
+                row_frame.configure(border_color=theme.ACCENT_GREEN, border_width=2)
+            else:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+
+    def _find_ans_tmpl_drop_target(self, y_root: int) -> Optional[int]:
+        for row_frame, idx in self._ans_tmpl_rows:
+            ry = row_frame.winfo_rooty()
+            rh = row_frame.winfo_height()
+            if ry <= y_root <= ry + rh:
+                return idx
+        return None
+
+    def _on_ans_tmpl_drag_release(self, event):
+        if self._drag_ans_tmpl_idx is None:
+            return
+        src_idx = self._drag_ans_tmpl_idx
+        self._drag_ans_tmpl_idx = None
+        target_idx = self._find_ans_tmpl_drop_target(event.y_root)
+
+        for row_frame, _ in self._ans_tmpl_rows:
+            try:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+            except Exception:
+                pass
+
+        if target_idx is not None and target_idx != src_idx and 0 <= target_idx < len(self.config.answer_templates):
+            tmpl = self.config.answer_templates.pop(src_idx)
+            self.config.answer_templates.insert(target_idx, tmpl)
+            self.config_mgr.save()
+            self._refresh_answer_templates_view()
+            self._update_combo_answer_templates_values()
+            self.log(f"Moved answer template '{tmpl.name}' to position #{target_idx + 1}.", "info")
+
     def _update_combo_answer_templates_values(self):
         names = [t.name for t in self.config.answer_templates] or ["Default"]
         if hasattr(self, "combo_answer_templates"):
@@ -3186,19 +3266,25 @@ class UltimateApp:
     def _on_add_answer_template(self):
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Add Answer Template")
-        dialog.geometry("500x380")
+        dialog.geometry("520x440")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        self._center_toplevel(dialog, 500, 380)
+        self._center_toplevel(dialog, 520, 440)
 
         ctk.CTkLabel(dialog, text="Add Answer Template", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
 
-        ctk.CTkLabel(dialog, text="Template Name (e.g. Solo, S partou, English):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        ctk.CTkLabel(dialog, text="Template Name (e.g. Solo, S partou, Deutsch):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
         entry_name = ctk.CTkEntry(dialog, placeholder_text="e.g. S partou")
-        entry_name.pack(fill="x", padx=20, pady=(0, 8))
+        entry_name.pack(fill="x", padx=20, pady=(0, 6))
 
-        ctk.CTkLabel(dialog, text="Template Text (use [...] for answers, {username} for your username):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        ctk.CTkLabel(dialog, text="Assigned AI System Prompt (optional):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        sp_names = ["(Default / First prompt)"] + [sp.name for sp in self.config.ai.system_prompts]
+        combo_ai_prompt = ctk.CTkComboBox(dialog, values=sp_names, width=280)
+        combo_ai_prompt.set(sp_names[0])
+        combo_ai_prompt.pack(anchor="w", padx=20, pady=(0, 6))
+
+        ctk.CTkLabel(dialog, text="Template Text (use [...] for answers, {username} for username):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
         txt_tmpl = ctk.CTkTextbox(dialog, height=140, wrap="word")
         txt_tmpl.pack(fill="both", expand=True, padx=20, pady=2)
         default_tmpl_text = "Ahoj, zasílám odpovědi na otázky z listingu:\n[...]\n\nDíky za keš!\n{username}"
@@ -3223,7 +3309,10 @@ class UltimateApp:
             if "[...]" not in text and "{answers}" not in text:
                 text = f"{text}\n\n[...]"
 
-            new_tmpl = AnswerTemplate(name=name, text=text)
+            sel_sp = combo_ai_prompt.get().strip()
+            assigned_sp = "" if sel_sp.startswith("(") else sel_sp
+
+            new_tmpl = AnswerTemplate(name=name, text=text, ai_prompt=assigned_sp)
             self.config.answer_templates.append(new_tmpl)
             self.config_mgr.save()
             self._refresh_answer_templates_view()
@@ -3242,18 +3331,25 @@ class UltimateApp:
 
         dialog = ctk.CTkToplevel(self.root)
         dialog.title(f"Edit Answer Template #{index + 1}")
-        dialog.geometry("500x380")
+        dialog.geometry("520x440")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        self._center_toplevel(dialog, 500, 380)
+        self._center_toplevel(dialog, 520, 440)
 
         ctk.CTkLabel(dialog, text=f"Edit Template '{tmpl.name}'", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
 
         ctk.CTkLabel(dialog, text="Template Name:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
         entry_name = ctk.CTkEntry(dialog)
         entry_name.insert(0, tmpl.name)
-        entry_name.pack(fill="x", padx=20, pady=(0, 8))
+        entry_name.pack(fill="x", padx=20, pady=(0, 6))
+
+        ctk.CTkLabel(dialog, text="Assigned AI System Prompt (optional):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        sp_names = ["(Default / First prompt)"] + [sp.name for sp in self.config.ai.system_prompts]
+        combo_ai_prompt = ctk.CTkComboBox(dialog, values=sp_names, width=280)
+        curr_p = tmpl.ai_prompt if tmpl.ai_prompt in [sp.name for sp in self.config.ai.system_prompts] else sp_names[0]
+        combo_ai_prompt.set(curr_p)
+        combo_ai_prompt.pack(anchor="w", padx=20, pady=(0, 6))
 
         ctk.CTkLabel(dialog, text="Template Text (use [...] for answers, {username} for username):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
         txt_tmpl = ctk.CTkTextbox(dialog, height=140, wrap="word")
@@ -3276,8 +3372,12 @@ class UltimateApp:
             if "[...]" not in text and "{answers}" not in text:
                 text = f"{text}\n\n[...]"
 
+            sel_sp = combo_ai_prompt.get().strip()
+            assigned_sp = "" if sel_sp.startswith("(") else sel_sp
+
             self.config.answer_templates[index].name = name
             self.config.answer_templates[index].text = text
+            self.config.answer_templates[index].ai_prompt = assigned_sp
             self.config_mgr.save()
             self._refresh_answer_templates_view()
             self._update_combo_answer_templates_values()
@@ -3301,6 +3401,226 @@ class UltimateApp:
                 self._update_combo_answer_templates_values()
                 self._update_approval_preview()
                 self.log(f"Removed answer template '{tmpl.name}'.", "info")
+
+    # --------------------------------------------------------------------------
+    # AI System Prompts Management
+    # --------------------------------------------------------------------------
+
+    def _refresh_sys_prompts_view(self):
+        if not hasattr(self, "sys_prompt_display_frame"):
+            return
+        for widget in self.sys_prompt_display_frame.winfo_children():
+            widget.destroy()
+
+        self._sys_prompt_rows = []
+
+        if not self.config.ai.system_prompts:
+            ctk.CTkLabel(self.sys_prompt_display_frame, text="No system prompts configured. Click 'Reset to defaults'.", text_color=theme.TEXT_MUTED).pack(anchor="w", pady=4)
+            return
+
+        for idx, sp in enumerate(self.config.ai.system_prompts):
+            row = ctk.CTkFrame(self.sys_prompt_display_frame, fg_color=theme.CARD_BG, corner_radius=6, border_width=1, border_color=theme.CARD_BORDER)
+            row.pack(fill="x", pady=2)
+            self._sys_prompt_rows.append((row, idx))
+
+            # Drag handle
+            drag_handle = ctk.CTkLabel(row, text=" ☰ ", font=ctk.CTkFont(size=14, weight="bold"), text_color=theme.TEXT_MUTED, cursor="fleur")
+            drag_handle.pack(side="left", padx=(8, 4))
+
+            display_snip = sp.prompt.replace("\n", " ").strip()
+            if len(display_snip) > 55:
+                display_snip = display_snip[:52] + "..."
+
+            lbl_name = ctk.CTkLabel(row, text=f"#{idx + 1}: {sp.name}", font=ctk.CTkFont(weight="bold"))
+            lbl_name.pack(side="left", padx=(4, 4), pady=6)
+
+            lbl_preview = ctk.CTkLabel(row, text=f"({display_snip})", font=ctk.CTkFont(size=11), text_color=theme.TEXT_MUTED)
+            lbl_preview.pack(side="left", padx=4, pady=6)
+
+            for w in (drag_handle, lbl_name):
+                w.bind("<Button-1>", lambda e, i=idx: self._on_sys_prompt_drag_start(e, i))
+                w.bind("<B1-Motion>", self._on_sys_prompt_drag_motion)
+                w.bind("<ButtonRelease-1>", self._on_sys_prompt_drag_release)
+
+            del_btn = ctk.CTkButton(
+                row,
+                text="Delete",
+                width=65,
+                height=26,
+                fg_color=theme.ACCENT_RED,
+                hover_color=theme.ACCENT_RED_HOVER,
+                command=lambda p_idx=idx: self._on_delete_system_prompt(p_idx)
+            )
+            del_btn.pack(side="right", padx=4)
+
+            edit_btn = ctk.CTkButton(
+                row,
+                text="Edit",
+                width=55,
+                height=26,
+                fg_color=theme.ACCENT_BLUE,
+                hover_color=theme.ACCENT_BLUE_HOVER,
+                command=lambda p_idx=idx: self._on_edit_system_prompt(p_idx)
+            )
+            edit_btn.pack(side="right", padx=4)
+
+    def _on_sys_prompt_drag_start(self, event, idx: int):
+        self._drag_sys_prompt_idx = idx
+        if 0 <= idx < len(self._sys_prompt_rows):
+            row_frame, _ = self._sys_prompt_rows[idx]
+            row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+
+    def _on_sys_prompt_drag_motion(self, event):
+        if self._drag_sys_prompt_idx is None:
+            return
+        target_idx = self._find_sys_prompt_drop_target(event.y_root)
+        for row_frame, i in self._sys_prompt_rows:
+            if i == self._drag_sys_prompt_idx:
+                row_frame.configure(border_color=theme.ACCENT_BLUE, border_width=2)
+            elif i == target_idx:
+                row_frame.configure(border_color=theme.ACCENT_GREEN, border_width=2)
+            else:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+
+    def _find_sys_prompt_drop_target(self, y_root: int) -> Optional[int]:
+        for row_frame, idx in self._sys_prompt_rows:
+            ry = row_frame.winfo_rooty()
+            rh = row_frame.winfo_height()
+            if ry <= y_root <= ry + rh:
+                return idx
+        return None
+
+    def _on_sys_prompt_drag_release(self, event):
+        if self._drag_sys_prompt_idx is None:
+            return
+        src_idx = self._drag_sys_prompt_idx
+        self._drag_sys_prompt_idx = None
+        target_idx = self._find_sys_prompt_drop_target(event.y_root)
+
+        for row_frame, _ in self._sys_prompt_rows:
+            try:
+                row_frame.configure(border_color=theme.CARD_BORDER, border_width=1)
+            except Exception:
+                pass
+
+        if target_idx is not None and target_idx != src_idx and 0 <= target_idx < len(self.config.ai.system_prompts):
+            sp = self.config.ai.system_prompts.pop(src_idx)
+            self.config.ai.system_prompts.insert(target_idx, sp)
+            self.config_mgr.save()
+            self._refresh_sys_prompts_view()
+            self.log(f"Moved system prompt '{sp.name}' to position #{target_idx + 1}.", "info")
+
+    def _on_add_system_prompt(self):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Add AI System Prompt")
+        dialog.geometry("540x440")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self._center_toplevel(dialog, 540, 440)
+
+        ctk.CTkLabel(dialog, text="Add AI System Prompt", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
+
+        ctk.CTkLabel(dialog, text="Prompt Name (e.g. 🇨🇿 Čeština, 🇬🇧 English, 🇩🇪 Deutsch, Custom):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        entry_name = ctk.CTkEntry(dialog, placeholder_text="e.g. 🇫🇷 Français")
+        entry_name.pack(fill="x", padx=20, pady=(0, 8))
+
+        ctk.CTkLabel(dialog, text="System Prompt Text:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        txt_prompt = ctk.CTkTextbox(dialog, height=180, wrap="word")
+        txt_prompt.pack(fill="both", expand=True, padx=20, pady=2)
+
+        btn_box = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_box.pack(pady=12)
+
+        def save():
+            name = entry_name.get().strip()
+            prompt = txt_prompt.get("1.0", "end").strip()
+            if not name:
+                messagebox.showwarning("System Prompt", "Prompt name cannot be empty.", parent=dialog)
+                return
+            if not prompt:
+                messagebox.showwarning("System Prompt", "Prompt text cannot be empty.", parent=dialog)
+                return
+            if any(p.name.lower() == name.lower() for p in self.config.ai.system_prompts):
+                messagebox.showwarning("System Prompt", f"A prompt named '{name}' already exists.", parent=dialog)
+                return
+
+            new_sp = SystemPromptConfig(name=name, prompt=prompt)
+            self.config.ai.system_prompts.append(new_sp)
+            self.config_mgr.save()
+            self._refresh_sys_prompts_view()
+            self.log(f"Added system prompt '{name}'.", "success")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_box, text="Save", width=100, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=save).pack(side="left", padx=6)
+        ctk.CTkButton(btn_box, text="Cancel", width=80, fg_color=theme.CARD_BORDER, command=dialog.destroy).pack(side="left", padx=6)
+
+    def _on_edit_system_prompt(self, index: int):
+        if not (0 <= index < len(self.config.ai.system_prompts)):
+            return
+        sp = self.config.ai.system_prompts[index]
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(f"Edit System Prompt #{index + 1}")
+        dialog.geometry("540x440")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self._center_toplevel(dialog, 540, 440)
+
+        ctk.CTkLabel(dialog, text=f"Edit Prompt '{sp.name}'", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
+
+        ctk.CTkLabel(dialog, text="Prompt Name:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        entry_name = ctk.CTkEntry(dialog)
+        entry_name.insert(0, sp.name)
+        entry_name.pack(fill="x", padx=20, pady=(0, 8))
+
+        ctk.CTkLabel(dialog, text="System Prompt Text:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        txt_prompt = ctk.CTkTextbox(dialog, height=180, wrap="word")
+        txt_prompt.pack(fill="both", expand=True, padx=20, pady=2)
+        txt_prompt.insert("1.0", sp.prompt)
+
+        btn_box = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_box.pack(pady=12)
+
+        def save():
+            name = entry_name.get().strip()
+            prompt = txt_prompt.get("1.0", "end").strip()
+            if not name:
+                messagebox.showwarning("System Prompt", "Prompt name cannot be empty.", parent=dialog)
+                return
+            if not prompt:
+                messagebox.showwarning("System Prompt", "Prompt text cannot be empty.", parent=dialog)
+                return
+
+            self.config.ai.system_prompts[index].name = name
+            self.config.ai.system_prompts[index].prompt = prompt
+            self.config_mgr.save()
+            self._refresh_sys_prompts_view()
+            self.log(f"Updated system prompt '{name}'.", "success")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_box, text="Save", width=100, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=save).pack(side="left", padx=6)
+        ctk.CTkButton(btn_box, text="Cancel", width=80, fg_color=theme.CARD_BORDER, command=dialog.destroy).pack(side="left", padx=6)
+
+    def _on_delete_system_prompt(self, index: int):
+        if 0 <= index < len(self.config.ai.system_prompts):
+            if len(self.config.ai.system_prompts) <= 1:
+                messagebox.showwarning("System Prompt", "You must keep at least one system prompt configured.", parent=self.root)
+                return
+            sp = self.config.ai.system_prompts[index]
+            if messagebox.askyesno("Delete prompt", f"Remove system prompt '{sp.name}'?", parent=self.root):
+                self.config.ai.system_prompts.pop(index)
+                self.config_mgr.save()
+                self._refresh_sys_prompts_view()
+                self.log(f"Removed system prompt '{sp.name}'.", "info")
+
+    def _on_reset_system_prompts(self):
+        if messagebox.askyesno("Reset prompts", "Reset all system prompts to default (🇨🇿 Čeština, 🇬🇧 English, 🇩🇪 Deutsch)?", parent=self.root):
+            self.config.ai.system_prompts = get_default_system_prompts()
+            self.config_mgr.save()
+            self._refresh_sys_prompts_view()
+            self.log("Reset system prompts to defaults.", "info")
 
     def _on_ai_provider_changed(self, choice: str):
         if "gemini" in choice.lower():
@@ -3383,7 +3703,7 @@ class UltimateApp:
         model = self.ai_model_entry.get().strip()
         api_key = self.ai_key_entry.get().strip()
         budget = int(round(self.ai_thinking_budget_slider.get() / 128.0) * 128) if hasattr(self, "ai_thinking_budget_slider") else 1024
-        prompt = self.ai_prompt_txt.get("1.0", "end").strip()
+        prompt = self.config.ai.system_prompts[0].prompt if self.config.ai.system_prompts else ""
 
         if not api_key:
             messagebox.showwarning("AI Test", "Please enter an API key first.", parent=self.root)
@@ -3396,6 +3716,7 @@ class UltimateApp:
             model=model,
             api_key=api_key,
             thinking_budget=budget,
+            system_prompts=self.config.ai.system_prompts,
             system_prompt=prompt
         )
 
@@ -3471,13 +3792,18 @@ class UltimateApp:
         self.btn_send_answer.configure(state="disabled")
         self.btn_skip_answer.configure(state="disabled")
 
+        tmpl_name = self.combo_approval_template.get() if hasattr(self, "combo_approval_template") else ""
+        matched_tmpl = next((t for t in self.config.answer_templates if t.name == tmpl_name), None)
+        active_ai_prompt_name = matched_tmpl.ai_prompt if (matched_tmpl and matched_tmpl.ai_prompt) else None
+
         def worker():
             ok, res = AiService.generate_answers(
                 config=self.config.ai,
                 listing=listing,
                 note=note,
                 gc_code=gccode,
-                cache_name=name
+                cache_name=name,
+                prompt_name=active_ai_prompt_name
             )
             def done():
                 self.txt_approval_answers.configure(state="normal")
@@ -3692,7 +4018,8 @@ class UltimateApp:
                 if hasattr(self, "ai_thinking_budget_slider"):
                     tokens = int(round(self.ai_thinking_budget_slider.get() / 128.0) * 128)
                     self.config.ai.thinking_budget = max(0, tokens)
-                self.config.ai.system_prompt = self.ai_prompt_txt.get("1.0", "end").strip()
+                if self.config.ai.system_prompts:
+                    self.config.ai.system_prompt = self.config.ai.system_prompts[0].prompt
                 self.config.default_answer_source = self.ai_default_source_combo.get().strip().lower()
 
             if self.config_mgr.save():

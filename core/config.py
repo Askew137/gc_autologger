@@ -111,9 +111,60 @@ class GeodeepNotesConfig:
 
 
 @dataclass
+class SystemPromptConfig:
+    name: str = ""
+    prompt: str = ""
+
+
+def get_default_system_prompts() -> List[SystemPromptConfig]:
+    return [
+        SystemPromptConfig(
+            name="🇨🇿 Čeština",
+            prompt=(
+                "Jsi zkušený asistent pro EarthCache a Virtual geocaching v České republice.\n"
+                "Tvým úkolem je na základě listingu (a případné poznámky hráče) připravit velmi stručné, věcné odpovědi na otázky pro ownera keše.\n"
+                "Pravidla:\n"
+                "1. Odpověz v češtině, formátuj striktně jako očíslovaný seznam: 1) ..., 2) ...\n"
+                "2. Pokud jsou odpovědi nebo nápovědy uvedeny v poznámce hráče, použij je přednostně a zformuluj je přesně.\n"
+                "3. Pokud listing ani poznámka přímo neobsahuje odpověď na terénní či historickou otázku (např. nadmořská výška, počátek těžby), použij své všeobecné geografické a historické znalosti dané lokality a doplň nejreálnější hodnotu.\n"
+                "4. Pokud je některý bod v otázkách pokyn k přiložení fotografie do logu (nikoliv otázka s odpovědí), napiš: 'Foto přiloženo k logu.'.\n"
+                "5. Neuváděj žádné úvodní ani závěrečné zdvořilostní fráze (žádné 'Ahoj', žádné 'S pozdravem'), pouze samotné číslované odpovědi."
+            )
+        ),
+        SystemPromptConfig(
+            name="🇬🇧 English",
+            prompt=(
+                "You are an expert assistant for EarthCache and Virtual geocaching.\n"
+                "Your task is to prepare very concise, factual answers to the listing questions for the cache owner based on the cache listing (and the player's personal field note, if any).\n"
+                "Rules:\n"
+                "1. Respond in English, format strictly as a numbered list: 1) ..., 2) ...\n"
+                "2. If answers or hints are provided in the player's note, prioritize them and formulate them accurately.\n"
+                "3. If neither the listing nor note explicitly contains the answer to a field or historical question (e.g. altitude, mining origins), use your general geographic and historical knowledge of the site to supply the most realistic value.\n"
+                "4. If an item in the questions is an instruction to attach a photo to the log (not a question to be answered), write: 'Photo attached to the log.'.\n"
+                "5. Do not include any introductory or concluding pleasantries (no 'Hello', no 'Best regards'), output only the numbered answers."
+            )
+        ),
+        SystemPromptConfig(
+            name="🇩🇪 Deutsch",
+            prompt=(
+                "Du bist ein erfahrener Assistent für EarthCache- und Virtual-Geocaching.\n"
+                "Deine Aufgabe ist es, anhand des Cache-Listings (und eventueller persönlicher Feldnotizen des Spielers) sehr präzise, sachliche Antworten auf die Listing-Fragen für den Cache-Owner zu verfassen.\n"
+                "Regeln:\n"
+                "1. Antworte auf Deutsch, formatiere streng als nummerierte Liste: 1) ..., 2) ...\n"
+                "2. Falls Antworten oder Hinweise in den Notizen des Spielers vorhanden sind, verwende diese vorrangig und formuliere sie exakt.\n"
+                "3. Wenn weder Listing noch Notizen die Antwort auf eine Gelände- oder historische Frage enthalten (z. B. Höhe über dem Meeresspiegel, Beginn des Abbaus), nutze dein allgemeines geografisches und historisches Wissen über den Ort, um den realistischsten Wert einzusetzen.\n"
+                "4. Wenn ein Punkt in den Fragen eine Anweisung zum Hochladen eines Fotos ins Log ist (keine zu beantwortende Frage), schreibe: 'Foto im Log beigefügt.'.\n"
+                "5. Keine einleitenden oder abschließenden Grußformeln (kein 'Hallo', kein 'Viele Grüße'), gib ausschließlich die nummerierten Antworten aus."
+            )
+        )
+    ]
+
+
+@dataclass
 class AnswerTemplate:
     name: str = ""
     text: str = ""
+    ai_prompt: str = ""
 
 
 @dataclass
@@ -124,16 +175,17 @@ class AiConfig:
     model: str = "gpt-4o-mini"
     base_url: str = ""
     thinking_budget: int = 1024
-    system_prompt: str = (
-        "Jsi zkušený asistent pro EarthCache a Virtual geocaching v České republice.\n"
-        "Tvým úkolem je na základě listingu (a případné poznámky hráče) připravit velmi stručné, věcné odpovědi na otázky pro ownera keše.\n"
-        "Pravidla:\n"
-        "1. Odpověz v češtině, formátuj striktně jako očíslovaný seznam: 1) ..., 2) ...\n"
-        "2. Pokud jsou odpovědi nebo nápovědy uvedeny v poznámce hráče, použij je přednostně a zformuluj je přesně.\n"
-        "3. Pokud listing ani poznámka přímo neobsahuje odpověď na terénní či historickou otázku (např. nadmořská výška, počátek těžby), použij své všeobecné geografické a historické znalosti dané lokality a doplň nejreálnější hodnotu.\n"
-        "4. Pokud je některý bod v otázkách pokyn k přiložení fotografie do logu (nikoliv otázka s odpovědí), napiš: 'Foto přiloženo k logu.'.\n"
-        "5. Neuváděj žádné úvodní ani závěrečné zdvořilostní fráze (žádné 'Ahoj', žádné 'S pozdravem'), pouze samotné číslované odpovědi."
-    )
+    system_prompts: List[SystemPromptConfig] = field(default_factory=get_default_system_prompts)
+    system_prompt: str = ""
+
+    def get_system_prompt(self, name: Optional[str] = None) -> str:
+        if name:
+            for sp in self.system_prompts:
+                if sp.name.strip().lower() == name.strip().lower():
+                    return sp.prompt
+        if self.system_prompts:
+            return self.system_prompts[0].prompt
+        return self.system_prompt or (get_default_system_prompts()[0].prompt)
 
 
 @dataclass
@@ -351,7 +403,11 @@ class ConfigManager:
         if isinstance(raw_ans, list):
             for it in raw_ans:
                 if isinstance(it, dict) and "name" in it and "text" in it:
-                    ans_templates.append(AnswerTemplate(name=str(it["name"]), text=str(it["text"])))
+                    ans_templates.append(AnswerTemplate(
+                        name=str(it["name"]),
+                        text=str(it["text"]),
+                        ai_prompt=str(it.get("ai_prompt", ""))
+                    ))
                 elif isinstance(it, str):
                     ans_templates.append(AnswerTemplate(name="Default", text=it))
         if not ans_templates:
@@ -359,6 +415,18 @@ class ConfigManager:
 
         # AI Assistant Config
         raw_ai = data.get("ai", {})
+        raw_prompts = raw_ai.get("system_prompts", [])
+        prompts = []
+        if isinstance(raw_prompts, list) and raw_prompts:
+            for it in raw_prompts:
+                if isinstance(it, dict) and "name" in it and "prompt" in it:
+                    prompts.append(SystemPromptConfig(name=str(it["name"]), prompt=str(it["prompt"])))
+        if not prompts:
+            legacy_sp = str(raw_ai.get("system_prompt", "")).strip()
+            prompts = get_default_system_prompts()
+            if legacy_sp:
+                prompts[0].prompt = legacy_sp
+
         ai_cfg = AiConfig(
             enabled=bool(raw_ai.get("enabled", False)),
             provider=str(raw_ai.get("provider", "openai")),
@@ -366,7 +434,8 @@ class ConfigManager:
             model=str(raw_ai.get("model", "gpt-4o-mini")),
             base_url=str(raw_ai.get("base_url", "")),
             thinking_budget=int(raw_ai.get("thinking_budget", 1024)),
-            system_prompt=str(raw_ai.get("system_prompt", AiConfig().system_prompt))
+            system_prompts=prompts,
+            system_prompt=prompts[0].prompt if prompts else ""
         )
 
         return AppConfig(
