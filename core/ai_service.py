@@ -43,10 +43,26 @@ class AiService:
     def test_connection(config: AiConfig) -> Tuple[bool, str]:
         """
         Send a lightweight ping to verify that the API key and endpoint are working.
+        For Gemini, also queries model metadata to inspect thinking support.
         Returns: (success: bool, message: str)
         """
         if not config.api_key:
             return False, "API key cannot be empty."
+
+        provider = (config.provider or "").lower().strip()
+        if provider == "gemini":
+            model_name = config.model.strip() or "gemini-2.5-flash"
+            meta_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}?key={config.api_key.strip()}"
+            try:
+                r = requests.get(meta_url, timeout=10)
+                if r.status_code == 200:
+                    mdata = r.json()
+                    supports_thinking = bool(mdata.get("thinking", False))
+                    disp_name = mdata.get("displayName", model_name)
+                    think_info = "podporuje uvažování (thinking)" if supports_thinking else "bez uvažování"
+                    return True, f"Spojení úspěšné! Model: {disp_name} ({think_info})"
+            except Exception:
+                pass
 
         test_prompt = "Odpověz jedním slovem: OK"
         ok, res = AiService._call_provider(config, test_prompt, timeout=30)
