@@ -41,6 +41,86 @@ def clean_note_text(text: Optional[str]) -> str:
     return cleaned.strip()
 
 
+def filter_geodeep_note(note: str, config: Any = None) -> str:
+    """
+    Filter and format Geodeep notes based on user preferences.
+    If config is None or has no enabled options, returns the note unchanged.
+    If the note contains Geodeep headers (Vloženo, Drive in, Ověřeno, Poznámky),
+    only the selected components are retained with cleaned up typography
+    (removing unwanted space before colons: 'Drive in :' -> 'Drive in:', 'Poznámky :' -> 'Poznámky:').
+    """
+    if not note or not config:
+        return note
+
+    has_any = getattr(config, "has_any_enabled", False)
+    if not has_any:
+        # None checked -> copy as-is without touching
+        return note
+
+    lines = note.splitlines()
+    vlozeno = None
+    drive_in = None
+    overeno = None
+    poznamky_lines = []
+    in_poznamky = False
+    is_geodeep = False
+
+    for line in lines:
+        if not in_poznamky:
+            m_vlozeno = re.match(r"^\s*Vloženo\s*:\s*(.*)$", line, re.IGNORECASE)
+            if m_vlozeno:
+                vlozeno = m_vlozeno.group(1).strip()
+                is_geodeep = True
+                continue
+
+            m_drive = re.match(r"^\s*Drive\s*in\s*:\s*(.*)$", line, re.IGNORECASE)
+            if m_drive:
+                drive_in = m_drive.group(1).strip()
+                is_geodeep = True
+                continue
+
+            m_overeno = re.match(r"^\s*Ověřeno\s*:\s*(.*)$", line, re.IGNORECASE)
+            if m_overeno:
+                overeno = m_overeno.group(1).strip()
+                is_geodeep = True
+                continue
+
+            m_poznamky = re.match(r"^\s*Poznámky\s*:\s*(.*)$", line, re.IGNORECASE)
+            if m_poznamky:
+                first_line = m_poznamky.group(1).strip()
+                if first_line:
+                    poznamky_lines.append(first_line)
+                in_poznamky = True
+                is_geodeep = True
+                continue
+        else:
+            poznamky_lines.append(line)
+
+    if not is_geodeep:
+        # Not a Geodeep note -> do not touch
+        return note
+
+    # Build output from selected parts
+    parts = []
+    if getattr(config, "include_date", False) and vlozeno is not None:
+        parts.append(f"Vloženo: {vlozeno}")
+
+    if getattr(config, "include_drive_in", False) and drive_in is not None:
+        parts.append(f"Drive in: {drive_in}")
+
+    if getattr(config, "include_verified", False) and overeno is not None:
+        parts.append(f"Ověřeno: {overeno}")
+
+    if getattr(config, "include_notes", False):
+        body = "\n".join(poznamky_lines).strip()
+        if body:
+            parts.append(f"Poznámky:\n{body}")
+        elif in_poznamky:
+            parts.append("Poznámky:")
+
+    return "\n".join(parts)
+
+
 def _strip_namespaces(root: ET.Element) -> None:
     """Strip XML namespaces from element tags for reliable tag matching."""
     for elem in root.iter():

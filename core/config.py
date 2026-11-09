@@ -86,6 +86,18 @@ class GuiConfig:
 
 
 @dataclass
+class GeodeepNotesConfig:
+    include_date: bool = False
+    include_drive_in: bool = False
+    include_verified: bool = False
+    include_notes: bool = False
+
+    @property
+    def has_any_enabled(self) -> bool:
+        return self.include_date or self.include_drive_in or self.include_verified or self.include_notes
+
+
+@dataclass
 class AppConfig:
     accounts: List[AccountConfig] = field(default_factory=list)
     folder_path: str = ""
@@ -98,6 +110,7 @@ class AppConfig:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
+    geodeep_notes: GeodeepNotesConfig = field(default_factory=GeodeepNotesConfig)
 
 
 class ConfigManager:
@@ -149,7 +162,8 @@ class ConfigManager:
                 "log_templates": self.config.log_templates,
                 "safety": asdict(self.config.safety),
                 "filters": asdict(self.config.filters),
-                "gui": asdict(self.config.gui)
+                "gui": asdict(self.config.gui),
+                "geodeep_notes": asdict(self.config.geodeep_notes)
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(raw_dict, f, indent=2, ensure_ascii=False)
@@ -263,6 +277,15 @@ class ConfigManager:
             color_theme=str(raw_gui.get("color_theme", "blue"))
         )
 
+        # Geodeep Notes
+        raw_geodeep = data.get("geodeep_notes", {})
+        geodeep_notes = GeodeepNotesConfig(
+            include_date=bool(raw_geodeep.get("include_date", False)),
+            include_drive_in=bool(raw_geodeep.get("include_drive_in", False)),
+            include_verified=bool(raw_geodeep.get("include_verified", False)),
+            include_notes=bool(raw_geodeep.get("include_notes", False))
+        )
+
         return AppConfig(
             accounts=accounts,
             folder_path=str(data.get("folder_path", "")),
@@ -270,7 +293,8 @@ class ConfigManager:
             log_templates=list(data.get("log_templates", [])),
             safety=safety,
             filters=filters,
-            gui=gui
+            gui=gui,
+            geodeep_notes=geodeep_notes
         )
 
     def _migrate_legacy_config(self, legacy_path: str) -> None:

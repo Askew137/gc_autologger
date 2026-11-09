@@ -29,6 +29,12 @@
   "filters": {
     "omit_virtual_earth_webcam": false
   },
+  "geodeep_notes": {
+    "include_date": false,
+    "include_drive_in": false,
+    "include_verified": false,
+    "include_notes": false
+  },
   "gui": {
     "theme": "dark",
     "color_theme": "blue"

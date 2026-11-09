@@ -1119,6 +1119,63 @@ class UltimateApp:
             command=self._on_set_safety_defaults
         ).pack(anchor="w", padx=18, pady=(4, 12))
 
+        # 5. Geodeep Notes Section
+        geodeep_sec = ctk.CTkFrame(scroll)
+        geodeep_sec.pack(fill="x", pady=6, padx=6)
+        ctk.CTkLabel(geodeep_sec, text="Geodeep notes", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=12, pady=(10, 4))
+
+        ctk.CTkLabel(
+            geodeep_sec,
+            text="Vyberte pole z Geodeep poznámek, která se mají nahrát do osobní poznámky na webu (bez mezery před dvojtečkou).\n"
+                 "💡 Nezaškrtnutí žádného pole zkopíruje poznámky v původním znění beze změn.",
+            font=ctk.CTkFont(size=11),
+            text_color=theme.TEXT_MUTED,
+            justify="left"
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+
+        gd_content = ctk.CTkFrame(geodeep_sec, fg_color="transparent")
+        gd_content.pack(fill="x", padx=12, pady=(4, 12))
+
+        self.var_geodeep_date = ctk.BooleanVar(value=self.config.geodeep_notes.include_date)
+        self.chk_geodeep_date = ctk.CTkCheckBox(
+            gd_content,
+            text="Vloženo (Vloženo: YYYY-MM-DD)",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_geodeep_date,
+            command=self._on_toggle_geodeep_notes
+        )
+        self.chk_geodeep_date.pack(anchor="w", padx=4, pady=3)
+
+        self.var_geodeep_drive_in = ctk.BooleanVar(value=self.config.geodeep_notes.include_drive_in)
+        self.chk_geodeep_drive_in = ctk.CTkCheckBox(
+            gd_content,
+            text="Drive in (Drive in: ANO/NE)",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_geodeep_drive_in,
+            command=self._on_toggle_geodeep_notes
+        )
+        self.chk_geodeep_drive_in.pack(anchor="w", padx=4, pady=3)
+
+        self.var_geodeep_verified = ctk.BooleanVar(value=self.config.geodeep_notes.include_verified)
+        self.chk_geodeep_verified = ctk.CTkCheckBox(
+            gd_content,
+            text="Ověřeno (Ověřeno: ...)",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_geodeep_verified,
+            command=self._on_toggle_geodeep_notes
+        )
+        self.chk_geodeep_verified.pack(anchor="w", padx=4, pady=3)
+
+        self.var_geodeep_notes = ctk.BooleanVar(value=self.config.geodeep_notes.include_notes)
+        self.chk_geodeep_notes = ctk.CTkCheckBox(
+            gd_content,
+            text="Poznámky (Poznámky: text)",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_geodeep_notes,
+            command=self._on_toggle_geodeep_notes
+        )
+        self.chk_geodeep_notes.pack(anchor="w", padx=4, pady=3)
+
         # Save Configuration Button
         ctk.CTkButton(
             scroll,
@@ -1722,7 +1779,12 @@ class UltimateApp:
 
         mode = self.coords_mode_var.get()
         source_path = self.coords_path_entry.get().strip()
-        uploader = CoordinateUploader(self.client, self.safety, checkpoint_manager=self.checkpoint_mgr)
+        uploader = CoordinateUploader(
+            self.client,
+            self.safety,
+            checkpoint_manager=self.checkpoint_mgr,
+            geodeep_config=self.config.geodeep_notes
+        )
 
         def on_progress(idx, total, pct, eta, item):
             self.root.after(0, lambda: self._update_progress_ui(idx, total, pct, eta, f"Uploading {item.gccode}"))
@@ -1742,7 +1804,8 @@ class UltimateApp:
                     omit_virtual=f_cfg.omit_virtual,
                     omit_earth=f_cfg.omit_earth,
                     omit_events=f_cfg.omit_events,
-                    omit_webcam=f_cfg.omit_webcam
+                    omit_webcam=f_cfg.omit_webcam,
+                    geodeep_config=self.config.geodeep_notes
                 )
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Coordinates upload", res))
@@ -2758,6 +2821,20 @@ class UltimateApp:
     def _on_toggle_omit_virtual_earth(self):
         self._on_toggle_filters()
 
+    def _on_toggle_geodeep_notes(self):
+        self.config.geodeep_notes.include_date = self.var_geodeep_date.get()
+        self.config.geodeep_notes.include_drive_in = self.var_geodeep_drive_in.get()
+        self.config.geodeep_notes.include_verified = self.var_geodeep_verified.get()
+        self.config.geodeep_notes.include_notes = self.var_geodeep_notes.get()
+        self.config_mgr.save()
+        self.log(
+            f"Geodeep notes settings updated: Date={self.config.geodeep_notes.include_date}, "
+            f"DriveIn={self.config.geodeep_notes.include_drive_in}, "
+            f"Verified={self.config.geodeep_notes.include_verified}, "
+            f"Notes={self.config.geodeep_notes.include_notes}.",
+            "info"
+        )
+
     def _on_set_safety_defaults(self):
         self.entry_min_delay.delete(0, "end")
         self.entry_min_delay.insert(0, "0.7")
@@ -2781,6 +2858,12 @@ class UltimateApp:
             self.safety.max_delay = self.config.safety.max_delay_seconds
             self.safety.breather_interval = self.config.safety.breather_interval
             self.safety.breather_duration = self.config.safety.breather_duration_seconds
+
+            if hasattr(self, "var_geodeep_date"):
+                self.config.geodeep_notes.include_date = self.var_geodeep_date.get()
+                self.config.geodeep_notes.include_drive_in = self.var_geodeep_drive_in.get()
+                self.config.geodeep_notes.include_verified = self.var_geodeep_verified.get()
+                self.config.geodeep_notes.include_notes = self.var_geodeep_notes.get()
 
             if self.config_mgr.save():
                 messagebox.showinfo("Saved", "Settings successfully saved to config.json!", parent=self.root)

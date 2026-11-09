@@ -8,7 +8,7 @@ Provides progress reporting, live ETA calculation, and safety pacing.
 
 import time
 from typing import List, Callable, Optional, Dict, Any
-from core.gpx_parser import WaypointItem, is_virtual_or_earth, is_cache_filtered
+from core.gpx_parser import WaypointItem, is_virtual_or_earth, is_cache_filtered, filter_geodeep_note
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
@@ -24,11 +24,13 @@ class CoordinateUploader:
         self,
         client: GeocachingClient,
         safety: SafetyManager,
-        checkpoint_manager: Optional[RunCheckpointManager] = None
+        checkpoint_manager: Optional[RunCheckpointManager] = None,
+        geodeep_config: Optional[Any] = None
     ):
         self.client = client
         self.safety = safety
         self.checkpoint_manager = checkpoint_manager
+        self.geodeep_config = geodeep_config
 
     def run(
         self,
@@ -44,7 +46,8 @@ class CoordinateUploader:
         omit_earth: bool = False,
         omit_events: bool = False,
         omit_webcam: bool = False,
-        omit_virtual_and_earth: bool = False
+        omit_virtual_and_earth: bool = False,
+        geodeep_config: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         Execute the upload process.
@@ -57,6 +60,7 @@ class CoordinateUploader:
         :return: Summary dictionary with results.
         """
         self.safety.reset()
+        g_cfg = geodeep_config or self.geodeep_config
         total = len(items)
         success_count = 0
         skipped_count = 0
@@ -166,7 +170,9 @@ class CoordinateUploader:
 
             # Query web status if UNMODIFIED_ONLY mode is active
             user_status = None
-            if mode == self.MODE_UNMODIFIED_ONLY and (upload_coords or (upload_notes and getattr(item, "note", ""))):
+            raw_note = getattr(item, "note", "")
+            effective_note = filter_geodeep_note(raw_note, g_cfg)
+            if mode == self.MODE_UNMODIFIED_ONLY and (upload_coords or (upload_notes and effective_note)):
                 if self.safety.is_cancelled:
                     log(f"Upload cancelled by user at item {idx}/{total}.", "warning")
                     break
@@ -199,14 +205,14 @@ class CoordinateUploader:
                 if self.safety.is_cancelled:
                     log(f"Upload cancelled by user at item {idx}/{total}.", "warning")
                     break
-                if not getattr(item, "note", ""):
+                if not effective_note:
                     note_status = "SKIPPED_EMPTY"
-                    note_msg = "No note in GPX"
+                    note_msg = "No note in GPX" if not raw_note else "Filtered out by Geodeep settings"
                 elif mode == self.MODE_UNMODIFIED_ONLY and user_status and user_status.get("has_personal_note") is True:
                     note_status = "SKIPPED_EXISTS"
                     note_msg = "Personal note already exists on web"
                 else:
-                    n_succ, n_msg = self.client.upload_personal_note(item.gccode, item.note)
+                    n_succ, n_msg = self.client.upload_personal_note(item.gccode, effective_note)
                     if n_succ:
                         note_status = "SUCCESS"
                         note_msg = n_msg
