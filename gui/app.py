@@ -435,7 +435,7 @@ class UltimateApp:
         self.logger_mode_var = ctk.StringVar(value="CREATE")
         self.logger_mode_seg = ctk.CTkSegmentedButton(
             mode_frame,
-            values=["Create logs", "Edit logs", "Delete logs"],
+            values=["Create logs", "Edit logs", "Delete logs", "Send concepts"],
             command=self._on_logger_mode_changed
         )
         self.logger_mode_seg.set("Create logs")
@@ -463,6 +463,27 @@ class UltimateApp:
             text_color="#fca5a5",
             justify="left"
         ).pack(padx=16, pady=20)
+
+        # Send concepts mode informational frame (shown only in Send concepts mode)
+        self.frame_concepts_info = ctk.CTkFrame(
+            self.logger_left_box,
+            fg_color="#182234",
+            border_width=1,
+            border_color="#38bdf8",
+            corner_radius=6
+        )
+        ctk.CTkLabel(
+            self.frame_concepts_info,
+            text="Send Concepts (Drafts) Mode:\n\n"
+                 "Automatically fetches all pending log drafts from your\n"
+                 "Geocaching.com account and submits them as official logs.\n\n"
+                 "• Dates, log types, and notes written in the field\n"
+                 "  are preserved exactly as recorded.\n\n"
+                 "Click Start below to begin sending concepts.",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#bae6fd",
+            justify="left"
+        ).pack(padx=20, pady=24)
 
         # Log Type
         self.lbl_log_type = ctk.CTkLabel(self.logger_left_box, text="Log type:", font=ctk.CTkFont(weight="bold"))
@@ -500,14 +521,14 @@ class UltimateApp:
             self.txt_log_message.insert("1.0", templates[0])
 
         # Right side: Target GC codes (with wrap="word")
-        right_box = ctk.CTkFrame(log_grid)
-        right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+        self.logger_right_box = ctk.CTkFrame(log_grid)
+        self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        ctk.CTkLabel(right_box, text="Target GC codes (from GPX or paste here):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=6)
-        self.txt_gc_codes = ctk.CTkTextbox(right_box, height=170, wrap="word")
+        ctk.CTkLabel(self.logger_right_box, text="Target GC codes (from GPX or paste here):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=6)
+        self.txt_gc_codes = ctk.CTkTextbox(self.logger_right_box, height=170, wrap="word")
         self.txt_gc_codes.pack(fill="both", expand=True, padx=10, pady=4)
 
-        btn_row = ctk.CTkFrame(right_box, fg_color="transparent")
+        btn_row = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
         ctk.CTkButton(btn_row, text="Import from GPX", width=120, command=self._import_codes_from_file).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Import from List", width=120, command=lambda: self._open_gc_list_import_dialog("bulk")).pack(side="left", padx=4)
@@ -588,6 +609,16 @@ class UltimateApp:
         self.btn_log_stop.pack(side="left", padx=6)
 
     def _on_logger_mode_changed(self, mode_val: str):
+        # Manage right box visibility (hidden in Send concepts mode)
+        if hasattr(self, "logger_right_box"):
+            if mode_val == "Send concepts":
+                self.logger_right_box.pack_forget()
+            else:
+                self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+
+        if hasattr(self, "frame_concepts_info"):
+            self.frame_concepts_info.grid_remove()
+
         if mode_val == "Create logs":
             self.logger_mode_var.set("CREATE")
             self.frame_delete_info.grid_remove()
@@ -662,6 +693,26 @@ class UltimateApp:
                 text="▶ Delete logs",
                 fg_color=theme.ACCENT_RED,
                 hover_color=theme.ACCENT_RED_HOVER
+            )
+
+        elif mode_val == "Send concepts":
+            self.logger_mode_var.set("CONCEPTS")
+            self.frame_delete_info.grid_remove()
+            self.lbl_log_type.grid_remove()
+            self.combo_log_type.grid_remove()
+            self.lbl_log_date.grid_remove()
+            self.date_box.grid_remove()
+            self.lbl_log_tmpl.grid_remove()
+            self.combo_template.grid_remove()
+            self.lbl_log_msg.grid_remove()
+            self.txt_log_message.grid_remove()
+
+            self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
+
+            self.btn_log_start.configure(
+                text="▶ Start sending concepts",
+                fg_color=theme.ACCENT_GREEN,
+                hover_color=theme.ACCENT_GREEN_HOVER
             )
     # --------------------------------------------------------------------------
     # Tab 3: Copy User
@@ -2013,15 +2064,47 @@ class UltimateApp:
         trigger_refresh()
 
     def _start_bulk_logging(self, resume: bool = False):
+        if self.is_running:
+            return
+
+        mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
+
+        # 0. CONCEPTS Mode (Send concepts)
+        if mode == "CONCEPTS":
+            self.is_running = True
+            self.btn_log_start.configure(state="disabled")
+            self.btn_log_pause.configure(state="normal", text="⏸ Pause")
+            self.btn_log_stop.configure(state="normal")
+            self.progress_bar.set(0)
+
+            logger = CacheLogger(self.client, self.safety)
+
+            def on_progress_concepts(idx, total, pct, eta, gc_code):
+                self.root.after(0, lambda: self._update_progress_ui(idx, total, pct, eta, f"Sending concept {gc_code}"))
+
+            def worker_concepts():
+                try:
+                    res = logger.run_send_concepts(
+                        on_progress=on_progress_concepts,
+                        on_log=self.log
+                    )
+                    self.root.after(0, self._reset_controls)
+                    self.root.after(0, lambda: self._on_operation_done("Send concepts", res))
+                except Exception as e:
+                    self.log(f"Error during sending concepts: {e}", "error")
+                    self.root.after(0, self._reset_controls)
+                    self.root.after(0, lambda: self._on_operation_error("Send concepts", str(e)))
+                finally:
+                    self.root.after(0, self._reset_controls)
+
+            threading.Thread(target=worker_concepts, daemon=True).start()
+            return
+
         raw_text = self.txt_gc_codes.get("1.0", "end").strip()
         codes = extract_gc_codes_from_string(raw_text)
         if not codes:
             messagebox.showwarning("Log caches", "No valid GC codes found. Please paste GC codes or import a GPX.", parent=self.root)
             return
-        if self.is_running:
-            return
-
-        mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
 
         # 1. DELETE Mode
         if mode == "DELETE":

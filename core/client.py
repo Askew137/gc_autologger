@@ -1506,3 +1506,127 @@ class GeocachingClient:
         except Exception as e:
             return False, f"Error removing {clean_code} from list: {e}"
 
+    # --------------------------------------------------------------------------
+    # Log Drafts (Concepts) Management
+    # --------------------------------------------------------------------------
+
+    def get_log_drafts(self) -> Tuple[bool, List[Dict[str, Any]], str]:
+        """
+        Fetch all pending log drafts (concepts) for the authenticated user from Web Proxy API.
+        Returns: (success, drafts_list, message)
+        Each draft dict contains:
+        {
+            "referenceCode": "LD...",
+            "geocacheCode": "GC...",
+            "geocacheName": "...",
+            "loggedDate": "2026-11-08T14:30:00",
+            "logType": "Found it",
+            "logTypeId": 2,
+            "note": "..."
+        }
+        """
+        if not self.ensure_valid_session():
+            return False, [], "Session is invalid. Please log in first."
+
+        bearer = self.get_oauth_bearer_token()
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": self.DEFAULT_USER_AGENT,
+            "Referer": f"{self.BASE_URL}/account/drafts"
+        }
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        all_drafts: List[Dict[str, Any]] = []
+        skip = 0
+        take = 100
+
+        try:
+            while True:
+                url = f"{self.BASE_URL}/api/proxy/web/v1/logdrafts?skip={skip}&take={take}"
+                resp = self.session.get(url, headers=headers, timeout=15)
+                if resp.status_code == 401:
+                    self.oauth_bearer_token = None
+                    bearer = self.get_oauth_bearer_token()
+                    if bearer:
+                        headers["Authorization"] = f"Bearer {bearer}"
+                        resp = self.session.get(url, headers=headers, timeout=15)
+
+                if resp.status_code != 200:
+                    return False, all_drafts, f"HTTP {resp.status_code}: {resp.text[:100]}"
+
+                data = resp.json()
+                items = data.get("data") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                total = data.get("total", len(items)) if isinstance(data, dict) else len(items)
+
+                for it in items:
+                    ref = it.get("referenceCode") or ""
+                    gccode = (it.get("geocacheCode") or "").upper()
+                    date_str = it.get("loggedDate") or ""
+                    log_type_info = it.get("geocacheLogType") or {}
+                    log_type_id = log_type_info.get("id") if isinstance(log_type_info, dict) else it.get("logType")
+                    log_type_name = log_type_info.get("name") if isinstance(log_type_info, dict) else str(log_type_id or "Log")
+                    note = it.get("note") or ""
+                    cache_name = it.get("geocacheName") or gccode
+
+                    if ref and gccode:
+                        all_drafts.append({
+                            "referenceCode": ref,
+                            "geocacheCode": gccode,
+                            "geocacheName": cache_name,
+                            "loggedDate": date_str,
+                            "logType": log_type_name,
+                            "logTypeId": log_type_id,
+                            "note": note,
+                            "useFavoritePoint": it.get("useFavoritePoint", False)
+                        })
+
+                skip += len(items)
+                if len(items) == 0 or skip >= total:
+                    break
+
+            return True, all_drafts, f"Found {len(all_drafts)} draft(s)"
+        except Exception as e:
+            return False, all_drafts, f"Error fetching drafts: {e}"
+
+    def promote_log_draft(self, reference_code: str) -> Tuple[bool, str]:
+        """
+        Promote a log draft into an official geocache log on Geocaching.com.
+        Endpoint: POST /api/proxy/web/v1/logdrafts/{reference_code}/promote
+        Returns: (success, message)
+        """
+        if not self.ensure_valid_session():
+            return False, "Session is invalid. Please log in first."
+
+        clean_ref = reference_code.strip()
+        bearer = self.get_oauth_bearer_token()
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": self.DEFAULT_USER_AGENT,
+            "Referer": f"{self.BASE_URL}/account/drafts"
+        }
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        csrf = self.get_csrf_token()
+        if csrf:
+            headers["X-Csrf-Token"] = csrf
+
+        try:
+            url = f"{self.BASE_URL}/api/proxy/web/v1/logdrafts/{clean_ref}/promote"
+            resp = self.session.post(url, headers=headers, json={}, timeout=15)
+            if resp.status_code == 401:
+                self.oauth_bearer_token = None
+                bearer = self.get_oauth_bearer_token()
+                if bearer:
+                    headers["Authorization"] = f"Bearer {bearer}"
+                    resp = self.session.post(url, headers=headers, json={}, timeout=15)
+
+            if resp.status_code in (200, 201, 204):
+                return True, f"Draft {clean_ref} promoted successfully"
+            return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
+        except Exception as e:
+            return False, f"Error promoting draft {clean_ref}: {e}"
+
+

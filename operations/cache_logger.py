@@ -628,3 +628,103 @@ class CacheLogger:
             "cancelled": self.safety.is_cancelled,
             "elapsed_seconds": total_elapsed
         }
+
+    def run_send_concepts(
+        self,
+        on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
+        on_log: Optional[Callable[[str, str], None]] = None,
+        checkpoint_manager: Optional[Any] = None,
+        resume: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Fetch all pending log drafts (concepts) from the user's account and promote them
+        to published geocache logs one by one with anti-detection pacing.
+        """
+        self.safety.reset()
+
+        def log(msg: str, level: str = "info"):
+            if checkpoint_manager:
+                checkpoint_manager.append_log(msg)
+            if on_log:
+                on_log(msg, level)
+            else:
+                print(f"[{level.upper()}] {msg}")
+
+        log("Fetching pending concepts from your Geocaching.com account...", "info")
+        ok, drafts, err_msg = self.client.get_log_drafts()
+        if not ok:
+            log(f"Failed to fetch concepts: {err_msg}", "error")
+            return {"total": 0, "success": 0, "failed": 0, "failed_items": [], "cancelled": False, "elapsed_seconds": 0.0}
+
+        total = len(drafts)
+        if total == 0:
+            log("No pending concepts found on your account.", "info")
+            return {"total": 0, "success": 0, "failed": 0, "failed_items": [], "cancelled": False, "elapsed_seconds": 0.0}
+
+        log(f"Found {total} concept(s) waiting to be sent. Starting submission...", "info")
+
+        start_time = time.time()
+        success_count = 0
+        failed_count = 0
+        failed_items: List[Dict[str, str]] = []
+        processed_times: List[float] = []
+
+        for idx, draft in enumerate(drafts, 1):
+            if self.safety.is_cancelled:
+                log(f"Submission cancelled by user at item {idx}/{total}.", "warning")
+                break
+
+            item_start = time.time()
+            ref_code = draft.get("referenceCode", "")
+            gc_code = draft.get("geocacheCode", "")
+            log_type = draft.get("logType", "Log")
+            date_raw = draft.get("loggedDate", "")
+            date_display = date_raw[:10] if date_raw else ""
+            prefix = f"[{idx}/{total}] {gc_code} ({ref_code})"
+
+            # Promote draft to live log
+            succ, msg = self.client.promote_log_draft(ref_code)
+
+            if succ:
+                success_count += 1
+                date_suffix = f" on {date_display}" if date_display else ""
+                log(f"{prefix} ✅ Concept submitted as {log_type}{date_suffix}", "success")
+            else:
+                failed_count += 1
+                failed_items.append({"gccode": gc_code, "reason": msg})
+                log(f"{prefix} ❌ Failed to submit concept: {msg}", "error")
+
+            # Progress & ETA calculation
+            elapsed_item = time.time() - item_start
+            processed_times.append(elapsed_item)
+            avg_time = sum(processed_times[-10:]) / len(processed_times[-10:])
+            remaining_items = total - idx
+            eta = remaining_items * (avg_time + ((self.safety.min_delay + self.safety.max_delay) / 2))
+
+            percent = (idx / total) * 100
+            if on_progress:
+                on_progress(idx, total, percent, eta, gc_code)
+
+            if idx < total:
+                if not self.safety.wait_before_next(idx, total, log_callback=lambda m: log(m, "info")):
+                    log("Concepts submission interrupted.", "warning")
+                    break
+
+        total_elapsed = time.time() - start_time
+        is_cancelled = self.safety.is_cancelled
+        summary = {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "failed_items": failed_items,
+            "cancelled": is_cancelled,
+            "elapsed_seconds": total_elapsed
+        }
+
+        if is_cancelled:
+            log(f"Concepts submission stopped by user! Submitted: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "warning")
+        else:
+            log(f"Concepts submission complete! Submitted: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+
+        return summary
+
