@@ -71,7 +71,10 @@ class AiService:
                         "parts": [{"text": user_content}]
                     }],
                     "generationConfig": {
-                        "temperature": 0.2
+                        "temperature": 0.2,
+                        "thinkingConfig": {
+                            "thinkingBudget": 1024
+                        }
                     }
                 }
                 resp = requests.post(url, json=payload, timeout=timeout)
