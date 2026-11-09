@@ -90,7 +90,7 @@ class AiService:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if not parts:
                     return False, "Gemini returned empty parts."
-                text = parts[0].get("text", "").strip()
+                text = str(parts[0].get("text", "") or "").strip()
                 return True, text
 
             else:
@@ -131,7 +131,9 @@ class AiService:
                 choices = data.get("choices", [])
                 if not choices:
                     return False, "AI returned no choices."
-                text = choices[0].get("message", {}).get("content", "").strip()
+                msg_obj = choices[0].get("message", {})
+                raw_text = msg_obj.get("content") or msg_obj.get("reasoning_content") or ""
+                text = str(raw_text).strip()
                 return True, text
 
         except requests.exceptions.Timeout:
