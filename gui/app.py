@@ -1408,6 +1408,8 @@ class UltimateApp:
         ctk.CTkLabel(ai_grid, text="Model name:", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=6, pady=4, sticky="w")
         self.ai_model_entry = ctk.CTkEntry(ai_grid, width=260, placeholder_text="e.g. gpt-4o-mini or Qwen/Qwen2.5-72B-Instruct")
         self.ai_model_entry.insert(0, self.config.ai.model or "gpt-4o-mini")
+        self.ai_model_entry.bind("<KeyRelease>", lambda e: self._update_thinking_budget_slider_limits())
+        self.ai_model_entry.bind("<FocusOut>", lambda e: self._update_thinking_budget_slider_limits())
         self.ai_model_entry.grid(row=2, column=1, padx=6, pady=4, sticky="w")
 
         # API Key
@@ -1448,6 +1450,7 @@ class UltimateApp:
 
         self.lbl_thinking_budget = ctk.CTkLabel(tb_box, text=self._format_thinking_budget(init_budget), font=ctk.CTkFont(size=12))
         self.lbl_thinking_budget.pack(side="left", padx=10)
+        self._update_thinking_budget_slider_limits()
 
         # System Prompt
         ctk.CTkLabel(ai_grid, text="System Prompt:", font=ctk.CTkFont(weight="bold")).grid(row=6, column=0, padx=6, pady=4, sticky="nw")
@@ -3308,7 +3311,41 @@ class UltimateApp:
             if not self.ai_model_entry.get().strip() or "gemini" in self.ai_model_entry.get().lower():
                 self.ai_model_entry.delete(0, "end")
                 self.ai_model_entry.insert(0, "gpt-4o-mini")
-        if hasattr(self, "lbl_thinking_budget") and hasattr(self, "ai_thinking_budget_slider"):
+        self._update_thinking_budget_slider_limits()
+
+    def _update_thinking_budget_slider_limits(self):
+        if not hasattr(self, "ai_thinking_budget_slider") or not hasattr(self, "lbl_thinking_budget"):
+            return
+        prov_val = self.ai_provider_combo.get() if hasattr(self, "ai_provider_combo") else ""
+        model = self.ai_model_entry.get().strip().lower() if hasattr(self, "ai_model_entry") else ""
+        is_gemini = "gemini" in prov_val.lower()
+
+        if is_gemini:
+            if "pro" in model:
+                # Pro models support up to 24576 tokens
+                max_val = 24576
+                steps = 96
+            elif "1.5" in model:
+                # Older Gemini 1.5 models do not support thinking
+                max_val = 0
+                steps = 1
+            else:
+                # Gemini 2.5 Flash supports up to 8192
+                max_val = 8192
+                steps = 64
+        else:
+            # OpenAI / MetaCentrum
+            max_val = 8192
+            steps = 64
+
+        current_val = self.ai_thinking_budget_slider.get()
+        if max_val == 0:
+            self.ai_thinking_budget_slider.configure(state="disabled")
+            self.lbl_thinking_budget.configure(text="Nepodporováno (model bez uvažování)")
+        else:
+            self.ai_thinking_budget_slider.configure(state="normal", from_=0, to=max_val, number_of_steps=steps)
+            if current_val > max_val:
+                self.ai_thinking_budget_slider.set(max_val)
             self._on_thinking_budget_changed(self.ai_thinking_budget_slider.get())
 
     def _format_thinking_budget(self, val: float) -> str:
@@ -3321,8 +3358,10 @@ class UltimateApp:
             return f"{tokens} tok. (Vyvážené ~4s)"
         elif tokens <= 4096:
             return f"{tokens} tok. (Hluboké ~6-10s)"
+        elif tokens <= 8192:
+            return f"{tokens} tok. (Maximum pro Flash ~15s+)"
         else:
-            return f"{tokens} tok. (Maximum ~15s+)"
+            return f"{tokens} tok. (Pro model / Hluboké ~20s+)"
 
     def _on_thinking_budget_changed(self, val: float):
         tokens = int(round(val / 128.0) * 128)
