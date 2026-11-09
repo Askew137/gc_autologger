@@ -167,12 +167,18 @@ class CoordinateUploader:
             # Query web status if UNMODIFIED_ONLY mode is active
             user_status = None
             if mode == self.MODE_UNMODIFIED_ONLY and (upload_coords or (upload_notes and getattr(item, "note", ""))):
+                if self.safety.is_cancelled:
+                    log(f"Upload cancelled by user at item {idx}/{total}.", "warning")
+                    break
                 user_status = self.client.get_cache_user_status(item.gccode)
 
             # 1. Coordinate upload handling (if enabled)
             coords_status = None  # None = disabled, "SKIPPED", "SUCCESS", "FAILED"
             coords_msg = ""
             if upload_coords:
+                if self.safety.is_cancelled:
+                    log(f"Upload cancelled by user at item {idx}/{total}.", "warning")
+                    break
                 if mode == self.MODE_UNMODIFIED_ONLY and user_status and user_status.get("is_coords_modified") is True:
                     coords_status = "SKIPPED"
                     coords_msg = "Coordinates already modified on web"
@@ -190,6 +196,9 @@ class CoordinateUploader:
             note_status = None  # None = disabled, "SKIPPED_EMPTY", "SKIPPED_EXISTS", "SUCCESS", "FAILED"
             note_msg = ""
             if upload_notes:
+                if self.safety.is_cancelled:
+                    log(f"Upload cancelled by user at item {idx}/{total}.", "warning")
+                    break
                 if not getattr(item, "note", ""):
                     note_status = "SKIPPED_EMPTY"
                     note_msg = "No note in GPX"
@@ -277,8 +286,9 @@ class CoordinateUploader:
                     break
 
         # Checkpoint cleanup / archive
+        is_cancelled = self.safety.is_cancelled
         if self.checkpoint_manager:
-            if self.safety.is_cancelled:
+            if is_cancelled:
                 self.checkpoint_manager.finish_coords_run(status="cancelled")
             else:
                 self.checkpoint_manager.finish_coords_run(status="completed")
@@ -290,11 +300,15 @@ class CoordinateUploader:
             "skipped": skipped_count,
             "failed": failed_count,
             "failed_items": failed_items,
+            "cancelled": is_cancelled,
             "elapsed_seconds": total_elapsed
         }
 
         log("=" * 50, "info")
-        log(f"Upload Complete! Success: {success_count} | Skipped: {skipped_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        if is_cancelled:
+            log(f"Upload stopped by user! Success: {success_count} | Skipped: {skipped_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "warning")
+        else:
+            log(f"Upload Complete! Success: {success_count} | Skipped: {skipped_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
         if failed_items:
             log(f"Failed codes: {', '.join(f['gccode'] for f in failed_items[:10])}", "warning")
         log("=" * 50, "info")

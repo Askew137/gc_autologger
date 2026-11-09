@@ -2764,9 +2764,18 @@ class UltimateApp:
             self.log("Operation paused by user.", "warning")
 
     def _stop_operation(self):
-        if messagebox.askyesno("Stop", "Stop the current batch operation?", parent=self.root):
-            self.safety.cancel()
-            self.log("Cancelling operation...", "warning")
+        if not self.is_running:
+            return
+        self.safety.cancel()
+        self.log("Stopping operation...", "warning")
+        if hasattr(self, "btn_coords_stop"):
+            self.btn_coords_stop.configure(state="disabled")
+        if hasattr(self, "btn_coords_pause"):
+            self.btn_coords_pause.configure(state="disabled")
+        if hasattr(self, "btn_log_stop"):
+            self.btn_log_stop.configure(state="disabled")
+        if hasattr(self, "btn_log_pause"):
+            self.btn_log_pause.configure(state="disabled")
 
     def _update_progress_ui(self, current: int, total: int, percent: float, eta_seconds: Optional[float], text: str):
         self.progress_bar.set(percent / 100.0)
@@ -2781,23 +2790,29 @@ class UltimateApp:
         if hasattr(self, "_check_active_checkpoint"):
             self._check_active_checkpoint()
 
+        cancelled = res.get("cancelled", False) or getattr(self.safety, "is_cancelled", False)
         success = res.get("success", 0)
         failed = res.get("failed", 0)
         skipped = res.get("skipped", 0)
         elapsed = res.get("elapsed_seconds", 0.0)
 
         if hasattr(self, "progress_bar"):
-            self.progress_bar.set(1.0)
+            if not cancelled:
+                self.progress_bar.set(1.0)
         if hasattr(self, "lbl_progress_text"):
-            summary_short = f"Done: {success} OK, {failed} failed"
+            status_word = "Stopped" if cancelled else "Done"
+            summary_short = f"{status_word}: {success} OK, {failed} failed"
             if skipped:
                 summary_short += f", {skipped} skipped"
             summary_short += f" ({elapsed:.1f}s)"
             self.lbl_progress_text.configure(text=summary_short)
         if hasattr(self, "lbl_eta"):
-            self.lbl_eta.configure(text="ETA: 00:00")
+            self.lbl_eta.configure(text="ETA: --:--" if cancelled else "ETA: 00:00")
 
-        self._show_completion_dialog(title, res)
+        if not cancelled:
+            self._show_completion_dialog(title, res)
+        else:
+            self.log(f"{title} stopped by user.", "warning")
 
     def _on_operation_error(self, title: str, error_msg: str):
         self._flush_log_buffer()

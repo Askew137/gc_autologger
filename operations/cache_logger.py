@@ -232,6 +232,7 @@ class CacheLogger:
 
         total_skipped = already_found_count + skipped_filter_count
         success_count = logged_count + total_skipped
+        is_cancelled = self.safety.is_cancelled
         summary = {
             "total": total,
             "success": success_count,
@@ -239,10 +240,14 @@ class CacheLogger:
             "skipped": total_skipped,
             "failed": failed_count,
             "failed_items": failed_items,
+            "cancelled": is_cancelled,
             "elapsed_seconds": total_elapsed
         }
 
-        log(f"Logging complete! Logged: {logged_count} | Skipped: {total_skipped} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        if is_cancelled:
+            log(f"Logging stopped by user! Logged: {logged_count} | Skipped: {total_skipped} | Failed: {failed_count} in {total_elapsed:.1f}s", "warning")
+        else:
+            log(f"Logging complete! Logged: {logged_count} | Skipped: {total_skipped} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
         return summary
 
     def run_edit_log(
@@ -354,9 +359,13 @@ class CacheLogger:
             "success": success_count,
             "failed": failed_count,
             "failed_items": failed_items,
+            "cancelled": self.safety.is_cancelled,
             "elapsed_seconds": total_elapsed
         }
-        log(f"Bulk edit complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        if self.safety.is_cancelled:
+            log(f"Bulk edit stopped by user! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "warning")
+        else:
+            log(f"Bulk edit complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
         return summary
 
     def run_delete_log(
@@ -444,9 +453,13 @@ class CacheLogger:
             "success": success_count,
             "failed": failed_count,
             "failed_items": failed_items,
+            "cancelled": self.safety.is_cancelled,
             "elapsed_seconds": total_elapsed
         }
-        log(f"Bulk delete complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
+        if self.safety.is_cancelled:
+            log(f"Bulk delete stopped by user! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "warning")
+        else:
+            log(f"Bulk delete complete! Success: {success_count} | Failed: {failed_count} in {total_elapsed:.1f}s", "info")
         return summary
 
     def run_ignore(
@@ -536,6 +549,7 @@ class CacheLogger:
             "success": success_count,
             "failed": failed_count,
             "failed_items": failed_items,
+            "cancelled": self.safety.is_cancelled,
             "elapsed_seconds": total_elapsed
         }
 
@@ -611,5 +625,6 @@ class CacheLogger:
             "success": success_count,
             "failed": failed_count,
             "failed_items": failed_items,
+            "cancelled": self.safety.is_cancelled,
             "elapsed_seconds": total_elapsed
         }
