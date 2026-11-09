@@ -22,13 +22,14 @@ except ImportError:
     ctk = None
     CTK_AVAILABLE = False
 
-from core.config import ConfigManager, AccountConfig, get_base_dir, get_bundle_dir
+from core.config import ConfigManager, AccountConfig, AnswerTemplate, AiConfig, get_base_dir, get_bundle_dir
 from core.client import GeocachingClient
 from core.safety import SafetyManager
 from core.checkpoint import RunCheckpointManager
 from core.gpx_parser import parse_file, parse_folder, extract_gc_codes_from_string, WaypointItem, is_virtual_or_earth, is_cache_filtered
+from core.ai_service import AiService
 from operations.coordinate_uploader import CoordinateUploader
-from operations.cache_logger import CacheLogger, LOG_TYPE_MAP, LOG_TYPE_NAMES
+from operations.cache_logger import CacheLogger, LOG_TYPE_MAP, LOG_TYPE_NAMES, extract_answers_from_note, format_answer_message
 from operations.user_copy import UserLogCopier
 import gui.theme as theme
 
@@ -80,6 +81,13 @@ class UltimateApp:
         self._acc_rows: List[tuple] = []
         self._drag_tmpl_idx: Optional[int] = None
         self._tmpl_rows: List[tuple] = []
+        self._ans_tmpl_rows: List[tuple] = []
+
+        # Send concepts & answers approval state
+        self.var_send_answers = ctk.BooleanVar(value=self.config.send_answers)
+        self._approval_event = threading.Event()
+        self._approval_result: Tuple[str, str, str] = ("SKIP", "", "")
+        self._current_approval_data: Dict[str, Any] = {}
 
         self._init_ui()
         self._set_app_icon()
@@ -483,7 +491,16 @@ class UltimateApp:
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#bae6fd",
             justify="left"
-        ).pack(padx=20, pady=24)
+        ).pack(padx=20, pady=(20, 10))
+
+        self.chk_send_answers = ctk.CTkCheckBox(
+            self.frame_concepts_info,
+            text="Send answers to cache owners (EarthCache / Virtual)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            variable=self.var_send_answers,
+            command=self._on_toggle_send_answers
+        )
+        self.chk_send_answers.pack(anchor="w", padx=20, pady=(0, 20))
 
         # Log Type
         self.lbl_log_type = ctk.CTkLabel(self.logger_left_box, text="Log type:", font=ctk.CTkFont(weight="bold"))
@@ -520,19 +537,160 @@ class UltimateApp:
         if templates:
             self.txt_log_message.insert("1.0", templates[0])
 
-        # Right side: Target GC codes (with wrap="word")
+        # Right side: Target GC codes & Answers approval
         self.logger_right_box = ctk.CTkFrame(log_grid)
         self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        ctk.CTkLabel(self.logger_right_box, text="Target GC codes (from GPX or paste here):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=6)
-        self.txt_gc_codes = ctk.CTkTextbox(self.logger_right_box, height=170, wrap="word")
+        # Standard GC codes input container
+        self.frame_gc_codes_input = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
+        self.frame_gc_codes_input.pack(fill="both", expand=True)
+
+        ctk.CTkLabel(self.frame_gc_codes_input, text="Target GC codes (from GPX or paste here):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=6)
+        self.txt_gc_codes = ctk.CTkTextbox(self.frame_gc_codes_input, height=170, wrap="word")
         self.txt_gc_codes.pack(fill="both", expand=True, padx=10, pady=4)
 
-        btn_row = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
+        btn_row = ctk.CTkFrame(self.frame_gc_codes_input, fg_color="transparent")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
         ctk.CTkButton(btn_row, text="Import from GPX", width=120, command=self._import_codes_from_file).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Import from List", width=120, command=lambda: self._open_gc_list_import_dialog("bulk")).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Clear codes", width=90, fg_color=theme.CARD_BORDER, command=lambda: self.txt_gc_codes.delete("1.0", "end")).pack(side="left", padx=4)
+
+        # Answers Approval Panel (shown when Send concepts + Send answers is active)
+        self.frame_answers_approval = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
+
+        # 1. Header Card
+        self.lbl_approval_cache_info = ctk.CTkLabel(
+            self.frame_answers_approval,
+            text="⏳ Waiting for EarthCache / Virtual Cache concepts...",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#38bdf8",
+            justify="left",
+            anchor="w"
+        )
+        self.lbl_approval_cache_info.pack(fill="x", padx=8, pady=(4, 6))
+
+        # 2. Template Selector Row
+        tmpl_sel_row = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
+        tmpl_sel_row.pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkLabel(tmpl_sel_row, text="Template:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 6))
+        ans_tmpl_names = [t.name for t in self.config.answer_templates] or ["Default"]
+        self.combo_answer_templates = ctk.CTkComboBox(
+            tmpl_sel_row,
+            values=ans_tmpl_names,
+            width=260,
+            command=self._on_approval_template_changed
+        )
+        if self.config.selected_answer_template in ans_tmpl_names:
+            self.combo_answer_templates.set(self.config.selected_answer_template)
+        elif ans_tmpl_names:
+            self.combo_answer_templates.set(ans_tmpl_names[0])
+        self.combo_answer_templates.pack(side="left")
+
+        # 3. Answers Editor Area
+        ctk.CTkLabel(
+            self.frame_answers_approval,
+            text="Answers (replaces [...] in template):",
+            font=ctk.CTkFont(size=12, weight="bold")
+        ).pack(anchor="w", padx=8, pady=(2, 2))
+
+        ans_editor_frame = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
+        ans_editor_frame.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+
+        self.txt_approval_answers = ctk.CTkTextbox(ans_editor_frame, height=130, wrap="word")
+        self.txt_approval_answers.pack(side="left", fill="both", expand=True)
+        self.txt_approval_answers.bind("<KeyRelease>", lambda e: self._update_approval_preview())
+
+        # Vertical 90-degree rotated button stack on the right of the textbox
+        ans_btn_stack = ctk.CTkFrame(ans_editor_frame, fg_color="transparent")
+        ans_btn_stack.pack(side="right", fill="y", padx=(6, 0))
+
+        ctk.CTkButton(
+            ans_btn_stack,
+            text="Blank",
+            width=65,
+            height=28,
+            fg_color=theme.CARD_BORDER,
+            hover_color=theme.CARD_BG,
+            command=self._on_ans_blank_clicked
+        ).pack(pady=2)
+
+        ctk.CTkButton(
+            ans_btn_stack,
+            text="Note",
+            width=65,
+            height=28,
+            fg_color=theme.ACCENT_BLUE,
+            hover_color=theme.ACCENT_BLUE_HOVER,
+            command=self._on_ans_note_clicked
+        ).pack(pady=2)
+
+        ctk.CTkButton(
+            ans_btn_stack,
+            text="AI",
+            width=65,
+            height=28,
+            fg_color="#8b5cf6",
+            hover_color="#7c3aed",
+            command=self._on_ans_ai_clicked
+        ).pack(pady=2)
+
+        # 4. Clipboard & Message Preview Row
+        clip_row = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
+        clip_row.pack(fill="x", padx=8, pady=2)
+        ctk.CTkButton(
+            clip_row,
+            text="Copy listing & note to clipboard",
+            width=240,
+            height=28,
+            fg_color=theme.CARD_BORDER,
+            hover_color=theme.CARD_BG,
+            command=self._on_copy_listing_to_clipboard
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            self.frame_answers_approval,
+            text="Full message preview:",
+            font=ctk.CTkFont(size=11),
+            text_color=theme.TEXT_MUTED
+        ).pack(anchor="w", padx=8, pady=(4, 0))
+
+        self.txt_approval_preview = ctk.CTkTextbox(
+            self.frame_answers_approval,
+            height=65,
+            wrap="word",
+            fg_color="#181c24",
+            text_color="#94a3b8"
+        )
+        self.txt_approval_preview.pack(fill="x", padx=8, pady=(2, 6))
+        self.txt_approval_preview.configure(state="disabled")
+
+        # 5. Bottom Action Buttons
+        approval_btn_row = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
+        approval_btn_row.pack(fill="x", padx=8, pady=(2, 6))
+
+        self.btn_send_answer = ctk.CTkButton(
+            approval_btn_row,
+            text="Send answer & Log",
+            font=ctk.CTkFont(weight="bold"),
+            fg_color=theme.ACCENT_GREEN,
+            hover_color=theme.ACCENT_GREEN_HOVER,
+            state="disabled",
+            height=32,
+            command=self._on_approve_send_clicked
+        )
+        self.btn_send_answer.pack(side="left", padx=(0, 6))
+
+        self.btn_skip_answer = ctk.CTkButton(
+            approval_btn_row,
+            text="Skip answer & Log",
+            font=ctk.CTkFont(weight="bold"),
+            fg_color="#d97706",
+            hover_color="#b45309",
+            state="disabled",
+            height=32,
+            command=self._on_approve_skip_clicked
+        )
+        self.btn_skip_answer.pack(side="left")
 
         # Resume banner frame (shown if an unfinished logging run is detected)
         self.frame_resume_logging = ctk.CTkFrame(
@@ -609,11 +767,19 @@ class UltimateApp:
         self.btn_log_stop.pack(side="left", padx=6)
 
     def _on_logger_mode_changed(self, mode_val: str):
-        # Manage right box visibility (hidden in Send concepts mode)
-        if hasattr(self, "logger_right_box"):
+        # Manage right box visibility (hidden in Send concepts mode unless send_answers is checked)
+        if hasattr(self, "logger_right_box") and hasattr(self, "frame_gc_codes_input") and hasattr(self, "frame_answers_approval"):
             if mode_val == "Send concepts":
-                self.logger_right_box.pack_forget()
+                self.frame_gc_codes_input.pack_forget()
+                if self.var_send_answers.get():
+                    self.frame_answers_approval.pack(fill="both", expand=True)
+                    self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+                else:
+                    self.frame_answers_approval.pack_forget()
+                    self.logger_right_box.pack_forget()
             else:
+                self.frame_answers_approval.pack_forget()
+                self.frame_gc_codes_input.pack(fill="both", expand=True)
                 self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
         if hasattr(self, "frame_concepts_info"):
@@ -1020,7 +1186,27 @@ class UltimateApp:
 
         ctk.CTkButton(add_tmpl_frame, text="+ Add log template", width=140, command=self._on_add_template).pack(side="left", padx=4)
 
-        # 3. Filters Section
+        # 3. Answer Templates Section
+        ans_tmpl_sec = ctk.CTkFrame(scroll)
+        ans_tmpl_sec.pack(fill="x", pady=6, padx=6)
+        ctk.CTkLabel(ans_tmpl_sec, text="Answer templates (EarthCache / Virtual)", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(
+            ans_tmpl_sec,
+            text="Templates for sending answers to cache owners. Use [...] where answers will be inserted, and {username} for your username.",
+            font=ctk.CTkFont(size=12),
+            text_color=theme.TEXT_MUTED
+        ).pack(anchor="w", padx=12, pady=(0, 4))
+
+        self.ans_tmpl_display_frame = ctk.CTkFrame(ans_tmpl_sec, fg_color="transparent")
+        self.ans_tmpl_display_frame.pack(fill="x", padx=12, pady=4)
+        self._refresh_answer_templates_view()
+
+        add_ans_tmpl_frame = ctk.CTkFrame(ans_tmpl_sec, fg_color="transparent")
+        add_ans_tmpl_frame.pack(fill="x", padx=12, pady=(8, 12))
+
+        ctk.CTkButton(add_ans_tmpl_frame, text="+ Add answer template", width=170, command=self._on_add_answer_template).pack(side="left", padx=4)
+
+        # 4. Filters Section
         filter_sec = ctk.CTkFrame(scroll)
         filter_sec.pack(fill="x", pady=6, padx=6)
         ctk.CTkLabel(filter_sec, text="Filters", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=12, pady=(10, 4))
@@ -1185,6 +1371,84 @@ class UltimateApp:
             command=self._on_toggle_geodeep_notes
         )
         self.chk_geodeep_notes.pack(anchor="w", padx=4, pady=3)
+
+        # 7. AI Assistant Settings Section
+        ai_sec = ctk.CTkFrame(scroll)
+        ai_sec.pack(fill="x", pady=6, padx=6)
+        ctk.CTkLabel(ai_sec, text="AI Assistant (EarthCache / Virtual Answers)", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(
+            ai_sec,
+            text="Configure AI to generate concise answers from cache listings and notes. Supports OpenAI, MetaCentrum (CESNET / vLLM), and Google Gemini.",
+            font=ctk.CTkFont(size=12),
+            text_color=theme.TEXT_MUTED
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+
+        ai_grid = ctk.CTkFrame(ai_sec, fg_color="transparent")
+        ai_grid.pack(fill="x", padx=12, pady=4)
+
+        # Provider
+        ctk.CTkLabel(ai_grid, text="Provider:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=6, pady=4, sticky="w")
+        self.ai_provider_combo = ctk.CTkComboBox(
+            ai_grid,
+            values=["OpenAI / MetaCentrum / Custom", "Google Gemini"],
+            width=260,
+            command=self._on_ai_provider_changed
+        )
+        current_prov = "Google Gemini" if self.config.ai.provider == "gemini" else "OpenAI / MetaCentrum / Custom"
+        self.ai_provider_combo.set(current_prov)
+        self.ai_provider_combo.grid(row=0, column=1, padx=6, pady=4, sticky="w")
+
+        # Base URL
+        ctk.CTkLabel(ai_grid, text="Base URL (optional):", font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, padx=6, pady=4, sticky="w")
+        self.ai_base_url_entry = ctk.CTkEntry(ai_grid, width=380, placeholder_text="e.g. https://llm.metacentrum.cz/v1 (leave empty for OpenAI)")
+        self.ai_base_url_entry.insert(0, self.config.ai.base_url)
+        self.ai_base_url_entry.grid(row=1, column=1, padx=6, pady=4, sticky="w")
+
+        # Model
+        ctk.CTkLabel(ai_grid, text="Model name:", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=6, pady=4, sticky="w")
+        self.ai_model_entry = ctk.CTkEntry(ai_grid, width=260, placeholder_text="e.g. gpt-4o-mini or Qwen/Qwen2.5-72B-Instruct")
+        self.ai_model_entry.insert(0, self.config.ai.model or "gpt-4o-mini")
+        self.ai_model_entry.grid(row=2, column=1, padx=6, pady=4, sticky="w")
+
+        # API Key
+        ctk.CTkLabel(ai_grid, text="API Key:", font=ctk.CTkFont(weight="bold")).grid(row=3, column=0, padx=6, pady=4, sticky="w")
+        key_box = ctk.CTkFrame(ai_grid, fg_color="transparent")
+        key_box.grid(row=3, column=1, padx=6, pady=4, sticky="w")
+        self.ai_key_entry = ctk.CTkEntry(key_box, width=320, show="*", placeholder_text="Enter API key or MetaCentrum token...")
+        self.ai_key_entry.insert(0, self.config.ai.api_key)
+        self.ai_key_entry.pack(side="left")
+        self.btn_toggle_ai_key = ctk.CTkButton(key_box, text="👁", width=36, command=self._toggle_ai_key_visibility)
+        self.btn_toggle_ai_key.pack(side="left", padx=4)
+
+        # Default Answer Source
+        ctk.CTkLabel(ai_grid, text="Default source:", font=ctk.CTkFont(weight="bold")).grid(row=4, column=0, padx=6, pady=4, sticky="w")
+        self.ai_default_source_combo = ctk.CTkComboBox(ai_grid, values=["Note", "AI", "Blank"], width=160)
+        source_val = (self.config.default_answer_source or "note").capitalize()
+        if source_val not in ["Note", "AI", "Blank"]:
+            source_val = "Note"
+        self.ai_default_source_combo.set(source_val)
+        self.ai_default_source_combo.grid(row=4, column=1, padx=6, pady=4, sticky="w")
+
+        # System Prompt
+        ctk.CTkLabel(ai_grid, text="System Prompt:", font=ctk.CTkFont(weight="bold")).grid(row=5, column=0, padx=6, pady=4, sticky="nw")
+        self.ai_prompt_txt = ctk.CTkTextbox(ai_grid, width=460, height=90, wrap="word")
+        self.ai_prompt_txt.insert("1.0", self.config.ai.system_prompt)
+        self.ai_prompt_txt.grid(row=5, column=1, padx=6, pady=4, sticky="w")
+
+        # Test Connection button
+        btn_ai_row = ctk.CTkFrame(ai_sec, fg_color="transparent")
+        btn_ai_row.pack(fill="x", padx=12, pady=(6, 12))
+        self.btn_test_ai = ctk.CTkButton(
+            btn_ai_row,
+            text="Test AI Connection",
+            width=160,
+            fg_color=theme.CARD_BORDER,
+            hover_color=theme.CARD_BG,
+            command=self._on_test_ai_connection
+        )
+        self.btn_test_ai.pack(side="left", padx=4)
+        self.lbl_ai_test_status = ctk.CTkLabel(btn_ai_row, text="", text_color=theme.TEXT_MUTED)
+        self.lbl_ai_test_status.pack(side="left", padx=10)
 
         # Save Configuration Button
         ctk.CTkButton(
@@ -2169,7 +2433,13 @@ class UltimateApp:
                 try:
                     res = logger.run_send_concepts(
                         on_progress=on_progress_concepts,
-                        on_log=self.log
+                        on_log=self.log,
+                        send_answers=self.var_send_answers.get(),
+                        answer_templates=self.config.answer_templates,
+                        selected_template_name=self.combo_answer_templates.get() if hasattr(self, "combo_answer_templates") else "Default",
+                        ai_config=self.config.ai,
+                        default_answer_source=self.config.default_answer_source,
+                        on_ask_answer=self._on_worker_ask_answer
                     )
                     self.root.after(0, self._reset_controls)
                     self.root.after(0, lambda: self._on_operation_done("Send concepts", res))
@@ -2179,6 +2449,7 @@ class UltimateApp:
                     self.root.after(0, lambda: self._on_operation_error("Send concepts", str(e)))
                 finally:
                     self.root.after(0, self._reset_controls)
+                    self.root.after(0, self._reset_approval_panel_to_idle)
 
             threading.Thread(target=worker_concepts, daemon=True).start()
             return
@@ -2828,6 +3099,436 @@ class UltimateApp:
                 self._update_combo_template_values()
                 self.log(f"Removed template #{index + 1}.", "info")
 
+    # --------------------------------------------------------------------------
+    # Answer Templates Management
+    # --------------------------------------------------------------------------
+
+    def _refresh_answer_templates_view(self):
+        if not hasattr(self, "ans_tmpl_display_frame"):
+            return
+        for widget in self.ans_tmpl_display_frame.winfo_children():
+            widget.destroy()
+
+        self._ans_tmpl_rows = []
+
+        if not self.config.answer_templates:
+            ctk.CTkLabel(self.ans_tmpl_display_frame, text="No answer templates configured. Add one below.", text_color=theme.TEXT_MUTED).pack(anchor="w", pady=4)
+            return
+
+        for idx, tmpl in enumerate(self.config.answer_templates):
+            row = ctk.CTkFrame(self.ans_tmpl_display_frame, fg_color=theme.CARD_BG, corner_radius=6, border_width=1, border_color=theme.CARD_BORDER)
+            row.pack(fill="x", pady=2)
+            self._ans_tmpl_rows.append((row, idx))
+
+            display_snip = tmpl.text.replace("\n", " ").strip()
+            if len(display_snip) > 50:
+                display_snip = display_snip[:47] + "..."
+
+            lbl_name = ctk.CTkLabel(row, text=f"#{idx + 1}: {tmpl.name}", font=ctk.CTkFont(weight="bold"))
+            lbl_name.pack(side="left", padx=(10, 4), pady=6)
+
+            lbl_preview = ctk.CTkLabel(row, text=f"({display_snip})", font=ctk.CTkFont(size=11), text_color=theme.TEXT_MUTED)
+            lbl_preview.pack(side="left", padx=4, pady=6)
+
+            del_btn = ctk.CTkButton(
+                row,
+                text="Delete",
+                width=65,
+                height=26,
+                fg_color=theme.ACCENT_RED,
+                hover_color=theme.ACCENT_RED_HOVER,
+                command=lambda t_idx=idx: self._on_delete_answer_template(t_idx)
+            )
+            del_btn.pack(side="right", padx=4)
+
+            edit_btn = ctk.CTkButton(
+                row,
+                text="Edit",
+                width=55,
+                height=26,
+                fg_color=theme.ACCENT_BLUE,
+                hover_color=theme.ACCENT_BLUE_HOVER,
+                command=lambda t_idx=idx: self._on_edit_answer_template(t_idx)
+            )
+            edit_btn.pack(side="right", padx=4)
+
+    def _update_combo_answer_templates_values(self):
+        names = [t.name for t in self.config.answer_templates] or ["Default"]
+        if hasattr(self, "combo_answer_templates"):
+            self.combo_answer_templates.configure(values=names)
+            cur = self.combo_answer_templates.get()
+            if cur not in names:
+                self.combo_answer_templates.set(names[0] if names else "Default")
+
+    def _on_add_answer_template(self):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Add Answer Template")
+        dialog.geometry("500x380")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self._center_toplevel(dialog, 500, 380)
+
+        ctk.CTkLabel(dialog, text="Add Answer Template", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
+
+        ctk.CTkLabel(dialog, text="Template Name (e.g. Solo, S partou, English):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        entry_name = ctk.CTkEntry(dialog, placeholder_text="e.g. S partou")
+        entry_name.pack(fill="x", padx=20, pady=(0, 8))
+
+        ctk.CTkLabel(dialog, text="Template Text (use [...] for answers, {username} for your username):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        txt_tmpl = ctk.CTkTextbox(dialog, height=140, wrap="word")
+        txt_tmpl.pack(fill="both", expand=True, padx=20, pady=2)
+        default_tmpl_text = "Ahoj, zasílám odpovědi na otázky z listingu:\n[...]\n\nDíky za keš!\n{username}"
+        txt_tmpl.insert("1.0", default_tmpl_text)
+
+        btn_box = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_box.pack(pady=12)
+
+        def save():
+            name = entry_name.get().strip()
+            text = txt_tmpl.get("1.0", "end").strip()
+            if not name:
+                messagebox.showwarning("Answer Template", "Template name cannot be empty.", parent=dialog)
+                return
+            if not text:
+                messagebox.showwarning("Answer Template", "Template text cannot be empty.", parent=dialog)
+                return
+            if any(t.name.lower() == name.lower() for t in self.config.answer_templates):
+                messagebox.showwarning("Answer Template", f"A template named '{name}' already exists.", parent=dialog)
+                return
+
+            if "[...]" not in text and "{answers}" not in text:
+                text = f"{text}\n\n[...]"
+
+            new_tmpl = AnswerTemplate(name=name, text=text)
+            self.config.answer_templates.append(new_tmpl)
+            self.config_mgr.save()
+            self._refresh_answer_templates_view()
+            self._update_combo_answer_templates_values()
+            self.log(f"Added answer template '{name}'.", "success")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_box, text="Save", width=100, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=save).pack(side="left", padx=6)
+        ctk.CTkButton(btn_box, text="Cancel", width=80, fg_color=theme.CARD_BORDER, command=dialog.destroy).pack(side="left", padx=6)
+
+    def _on_edit_answer_template(self, index: int):
+        if not (0 <= index < len(self.config.answer_templates)):
+            return
+
+        tmpl = self.config.answer_templates[index]
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(f"Edit Answer Template #{index + 1}")
+        dialog.geometry("500x380")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        self._center_toplevel(dialog, 500, 380)
+
+        ctk.CTkLabel(dialog, text=f"Edit Template '{tmpl.name}'", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(14, 8))
+
+        ctk.CTkLabel(dialog, text="Template Name:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        entry_name = ctk.CTkEntry(dialog)
+        entry_name.insert(0, tmpl.name)
+        entry_name.pack(fill="x", padx=20, pady=(0, 8))
+
+        ctk.CTkLabel(dialog, text="Template Text (use [...] for answers, {username} for username):", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        txt_tmpl = ctk.CTkTextbox(dialog, height=140, wrap="word")
+        txt_tmpl.pack(fill="both", expand=True, padx=20, pady=2)
+        txt_tmpl.insert("1.0", tmpl.text)
+
+        btn_box = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_box.pack(pady=12)
+
+        def save():
+            name = entry_name.get().strip()
+            text = txt_tmpl.get("1.0", "end").strip()
+            if not name:
+                messagebox.showwarning("Answer Template", "Template name cannot be empty.", parent=dialog)
+                return
+            if not text:
+                messagebox.showwarning("Answer Template", "Template text cannot be empty.", parent=dialog)
+                return
+
+            if "[...]" not in text and "{answers}" not in text:
+                text = f"{text}\n\n[...]"
+
+            self.config.answer_templates[index].name = name
+            self.config.answer_templates[index].text = text
+            self.config_mgr.save()
+            self._refresh_answer_templates_view()
+            self._update_combo_answer_templates_values()
+            self._update_approval_preview()
+            self.log(f"Updated answer template '{name}'.", "success")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_box, text="Save", width=100, fg_color=theme.ACCENT_GREEN, hover_color=theme.ACCENT_GREEN_HOVER, command=save).pack(side="left", padx=6)
+        ctk.CTkButton(btn_box, text="Cancel", width=80, fg_color=theme.CARD_BORDER, command=dialog.destroy).pack(side="left", padx=6)
+
+    def _on_delete_answer_template(self, index: int):
+        if 0 <= index < len(self.config.answer_templates):
+            if len(self.config.answer_templates) <= 1:
+                messagebox.showwarning("Answer Template", "You must keep at least one answer template configured.", parent=self.root)
+                return
+            tmpl = self.config.answer_templates[index]
+            if messagebox.askyesno("Delete template", f"Remove answer template '{tmpl.name}'?", parent=self.root):
+                self.config.answer_templates.pop(index)
+                self.config_mgr.save()
+                self._refresh_answer_templates_view()
+                self._update_combo_answer_templates_values()
+                self._update_approval_preview()
+                self.log(f"Removed answer template '{tmpl.name}'.", "info")
+
+    def _on_ai_provider_changed(self, choice: str):
+        if "gemini" in choice.lower():
+            if not self.ai_model_entry.get().strip() or "gpt" in self.ai_model_entry.get().lower():
+                self.ai_model_entry.delete(0, "end")
+                self.ai_model_entry.insert(0, "gemini-2.5-flash")
+        else:
+            if not self.ai_model_entry.get().strip() or "gemini" in self.ai_model_entry.get().lower():
+                self.ai_model_entry.delete(0, "end")
+                self.ai_model_entry.insert(0, "gpt-4o-mini")
+
+    def _toggle_ai_key_visibility(self):
+        if self.ai_key_entry.cget("show") == "*":
+            self.ai_key_entry.configure(show="")
+            self.btn_toggle_ai_key.configure(text="🔒")
+        else:
+            self.ai_key_entry.configure(show="*")
+            self.btn_toggle_ai_key.configure(text="👁")
+
+    def _on_test_ai_connection(self):
+        prov_val = self.ai_provider_combo.get()
+        provider = "gemini" if "gemini" in prov_val.lower() else "openai"
+        base_url = self.ai_base_url_entry.get().strip()
+        model = self.ai_model_entry.get().strip()
+        api_key = self.ai_key_entry.get().strip()
+        prompt = self.ai_prompt_txt.get("1.0", "end").strip()
+
+        if not api_key:
+            messagebox.showwarning("AI Test", "Please enter an API key first.", parent=self.root)
+            return
+
+        test_cfg = AiConfig(
+            enabled=True,
+            provider=provider,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            system_prompt=prompt
+        )
+
+        self.btn_test_ai.configure(state="disabled", text="Testing...")
+        self.lbl_ai_test_status.configure(text="Pinging AI endpoint...", text_color=theme.TEXT_MUTED)
+
+        def worker():
+            ok, msg = AiService.test_connection(test_cfg)
+            def done():
+                self.btn_test_ai.configure(state="normal", text="Test AI Connection")
+                if ok:
+                    self.lbl_ai_test_status.configure(text="✅ " + msg[:50], text_color=theme.ACCENT_GREEN)
+                    messagebox.showinfo("AI Connection", f"Success!\n\n{msg}", parent=self.root)
+                else:
+                    self.lbl_ai_test_status.configure(text="❌ " + msg[:40], text_color=theme.ACCENT_RED)
+                    messagebox.showerror("AI Connection Failed", f"Connection failed:\n\n{msg}", parent=self.root)
+            self.root.after(0, done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # --------------------------------------------------------------------------
+    # Send Concepts & Answer Approval UI Actions
+    # --------------------------------------------------------------------------
+
+    def _on_toggle_send_answers(self):
+        val = self.var_send_answers.get()
+        self.config.send_answers = val
+        self.config_mgr.save()
+        if self.logger_mode_var.get() == "CONCEPTS":
+            if val:
+                self.frame_gc_codes_input.pack_forget()
+                self.frame_answers_approval.pack(fill="both", expand=True)
+                self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+            else:
+                self.frame_answers_approval.pack_forget()
+                self.logger_right_box.pack_forget()
+
+    def _on_approval_template_changed(self, choice: str):
+        self.config.selected_answer_template = choice
+        self.config_mgr.save()
+        self._update_approval_preview()
+
+    def _on_ans_blank_clicked(self):
+        self.txt_approval_answers.delete("1.0", "end")
+        self._update_approval_preview()
+
+    def _on_ans_note_clicked(self):
+        note_ans = self._current_approval_data.get("extracted_answers", "")
+        self.txt_approval_answers.delete("1.0", "end")
+        self.txt_approval_answers.insert("1.0", note_ans)
+        self._update_approval_preview()
+
+    def _on_ans_ai_clicked(self):
+        self._trigger_ai_for_current_cache()
+
+    def _trigger_ai_for_current_cache(self):
+        if not self.config.ai.api_key:
+            messagebox.showwarning(
+                "AI Key Missing",
+                "Please configure your AI API key in the Settings tab first.",
+                parent=self.root
+            )
+            return
+
+        gccode = self._current_approval_data.get("gccode", "")
+        name = self._current_approval_data.get("name", "")
+        listing = self._current_approval_data.get("listing", "")
+        note = self._current_approval_data.get("note", "")
+
+        self.txt_approval_answers.delete("1.0", "end")
+        self.txt_approval_answers.insert("1.0", "⏳ Generuji odpovědi pomocí AI...")
+        self.txt_approval_answers.configure(state="disabled")
+        self.btn_send_answer.configure(state="disabled")
+        self.btn_skip_answer.configure(state="disabled")
+
+        def worker():
+            ok, res = AiService.generate_answers(
+                config=self.config.ai,
+                listing=listing,
+                note=note,
+                gc_code=gccode,
+                cache_name=name
+            )
+            def done():
+                self.txt_approval_answers.configure(state="normal")
+                self.txt_approval_answers.delete("1.0", "end")
+                if ok:
+                    self.txt_approval_answers.insert("1.0", res)
+                    self.log(f"AI generated answers for {gccode}.", "success")
+                else:
+                    self.txt_approval_answers.insert("1.0", self._current_approval_data.get("extracted_answers", ""))
+                    self.log(f"AI generation failed: {res}", "warning")
+                    messagebox.showwarning(
+                        "AI Generation",
+                        f"Failed to generate answers with AI:\n\n{res}\n\nReverting to cache note.",
+                        parent=self.root
+                    )
+                self.btn_send_answer.configure(state="normal")
+                self.btn_skip_answer.configure(state="normal")
+                self._update_approval_preview()
+            self.root.after(0, done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_copy_listing_to_clipboard(self):
+        gccode = self._current_approval_data.get("gccode", "")
+        name = self._current_approval_data.get("name", "")
+        listing = self._current_approval_data.get("listing", "")
+        note = self._current_approval_data.get("note", "")
+
+        text_to_copy = (
+            f"=== LISTING: {gccode} - {name} ===\n\n"
+            f"{listing}\n\n"
+            f"=== POZNÁMKA / NOTE ===\n"
+            f"{note if note.strip() else '(žádná poznámka / no note)'}"
+        )
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text_to_copy)
+        self.log(f"Listing and note for {gccode} copied to clipboard.", "info")
+
+    def _update_approval_preview(self):
+        tmpl_name = self.combo_answer_templates.get() if hasattr(self, "combo_answer_templates") else ""
+        tmpl_text = ""
+        for t in self.config.answer_templates:
+            if t.name == tmpl_name:
+                tmpl_text = t.text
+                break
+        if not tmpl_text and self.config.answer_templates:
+            tmpl_text = self.config.answer_templates[0].text
+        if not tmpl_text:
+            tmpl_text = "[...]"
+
+        answers = self.txt_approval_answers.get("1.0", "end").strip() if hasattr(self, "txt_approval_answers") else ""
+        gccode = self._current_approval_data.get("gccode", "")
+        cname = self._current_approval_data.get("name", "")
+        full = format_answer_message(
+            template_text=tmpl_text,
+            answers=answers,
+            username=self.client.logged_in_username if self.client else "",
+            gccode=gccode,
+            cache_name=cname
+        )
+        if hasattr(self, "txt_approval_preview"):
+            self.txt_approval_preview.configure(state="normal")
+            self.txt_approval_preview.delete("1.0", "end")
+            self.txt_approval_preview.insert("1.0", full)
+            self.txt_approval_preview.configure(state="disabled")
+
+    def _on_approve_send_clicked(self):
+        answers = self.txt_approval_answers.get("1.0", "end").strip()
+        tmpl_name = self.combo_answer_templates.get()
+        self._approval_result = ("SEND", answers, tmpl_name)
+        self.btn_send_answer.configure(state="disabled")
+        self.btn_skip_answer.configure(state="disabled")
+        self.lbl_approval_cache_info.configure(text="⏳ Processing...")
+        self._approval_event.set()
+
+    def _on_approve_skip_clicked(self):
+        self._approval_result = ("SKIP", "", "")
+        self.btn_send_answer.configure(state="disabled")
+        self.btn_skip_answer.configure(state="disabled")
+        self.lbl_approval_cache_info.configure(text="⏳ Processing...")
+        self._approval_event.set()
+
+    def _show_approval_request(self, payload: Dict[str, Any]):
+        self._current_approval_data = payload
+        gccode = payload.get("gccode", "")
+        name = payload.get("name", "")
+        ctype = payload.get("cache_type", "")
+        owner = payload.get("owner_name", "")
+        self.lbl_approval_cache_info.configure(
+            text=f"📍 {gccode}: {name} ({ctype})\n👤 Owner: {owner or 'Unknown'}"
+        )
+
+        source = (self.config.default_answer_source or "note").lower()
+        note_ans = payload.get("extracted_answers", "")
+
+        self.txt_approval_answers.delete("1.0", "end")
+        if source == "blank":
+            pass
+        elif source == "ai" and self.config.ai.api_key:
+            self._trigger_ai_for_current_cache()
+        else:
+            self.txt_approval_answers.insert("1.0", note_ans)
+
+        self._update_approval_preview()
+        self.btn_send_answer.configure(state="normal")
+        self.btn_skip_answer.configure(state="normal")
+
+    def _reset_approval_panel_to_idle(self):
+        if hasattr(self, "lbl_approval_cache_info"):
+            self.lbl_approval_cache_info.configure(text="⏳ Waiting for EarthCache / Virtual Cache concepts...")
+        if hasattr(self, "txt_approval_answers"):
+            self.txt_approval_answers.delete("1.0", "end")
+        if hasattr(self, "txt_approval_preview"):
+            self.txt_approval_preview.configure(state="normal")
+            self.txt_approval_preview.delete("1.0", "end")
+            self.txt_approval_preview.configure(state="disabled")
+        if hasattr(self, "btn_send_answer"):
+            self.btn_send_answer.configure(state="disabled")
+        if hasattr(self, "btn_skip_answer"):
+            self.btn_skip_answer.configure(state="disabled")
+        self._current_approval_data = {}
+
+    def _on_worker_ask_answer(self, payload: Dict[str, Any]) -> Tuple[str, str, str]:
+        """
+        Invoked from worker thread when an EarthCache or Virtual Cache concept is encountered.
+        Blocks worker thread until user takes action in GUI.
+        """
+        self._approval_event.clear()
+        self.root.after(0, lambda: self._show_approval_request(payload))
+        self._approval_event.wait()
+        return self._approval_result
+
     def _on_toggle_filters(self):
         self.config.filters.omit_virtual = self.var_omit_virtual.get()
         self.config.filters.omit_webcam = self.var_omit_virtual.get()
@@ -2900,6 +3601,16 @@ class UltimateApp:
                 self.config.geodeep_notes.include_verified = self.var_geodeep_verified.get()
                 self.config.geodeep_notes.include_notes = self.var_geodeep_notes.get()
 
+            if hasattr(self, "ai_provider_combo"):
+                prov_val = self.ai_provider_combo.get()
+                self.config.ai.provider = "gemini" if "gemini" in prov_val.lower() else "openai"
+                self.config.ai.base_url = self.ai_base_url_entry.get().strip()
+                self.config.ai.model = self.ai_model_entry.get().strip()
+                self.config.ai.api_key = self.ai_key_entry.get().strip()
+                self.config.ai.enabled = bool(self.config.ai.api_key)
+                self.config.ai.system_prompt = self.ai_prompt_txt.get("1.0", "end").strip()
+                self.config.default_answer_source = self.ai_default_source_combo.get().strip().lower()
+
             if self.config_mgr.save():
                 messagebox.showinfo("Saved", "Settings successfully saved to config.json!", parent=self.root)
                 self.log("Configuration updated and saved.", "success")
@@ -2968,6 +3679,9 @@ class UltimateApp:
         if not self.is_running:
             return
         self.safety.cancel()
+        if hasattr(self, "_approval_event"):
+            self._approval_result = ("STOP", "", "")
+            self._approval_event.set()
         self.log("Stopping operation...", "warning")
         if hasattr(self, "btn_coords_stop"):
             self.btn_coords_stop.configure(state="disabled")
@@ -3100,6 +3814,7 @@ class UltimateApp:
             self.btn_log_stop.configure(state="disabled")
         if hasattr(self, "lbl_eta"):
             self.lbl_eta.configure(text="ETA: --:--")
+        self._reset_approval_panel_to_idle()
 
     def run(self):
         """Start the GUI main loop."""

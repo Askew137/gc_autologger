@@ -53,3 +53,4 @@ cgeo*/
 # Local conversation summary & one-off utility scripts
 PROJECT_SUMMARY.md
 export_missing_caches.py
+scratch/

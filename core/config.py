@@ -111,6 +111,32 @@ class GeodeepNotesConfig:
 
 
 @dataclass
+class AnswerTemplate:
+    name: str = ""
+    text: str = ""
+
+
+@dataclass
+class AiConfig:
+    enabled: bool = False
+    provider: str = "openai"  # "openai" (OpenAI / MetaCentrum / Custom) or "gemini"
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+    base_url: str = ""
+    system_prompt: str = (
+        "Jsi asistent pro geocaching. Tvým úkolem je na základě listingu keše "
+        "a případné poznámky hráče připravit velmi stručné, věcné odpovědi na otázky k EarthCache nebo Virtual Cache.\n"
+        "Formátuj odpovědi striktně jako očíslovaný seznam:\n"
+        "1) ...\n"
+        "2) ...\n"
+        "3) ...\n"
+        "Pokud jsou odpovědi nebo nápovědy uvedeny v poznámce hráče, parafrázuj je a zformuluj přesně.\n"
+        "Pokud v poznámce chybí nebo je poznámka prázdná, odvoď/odhadni nejlepší možnou odpověď z informací v listingu.\n"
+        "Neuváděj žádné úvodní ani závěrečné zdvořilostní fráze (žádné 'Ahoj', žádné 'S pozdravem'), pouze samotné číslované odpovědi."
+    )
+
+
+@dataclass
 class AppConfig:
     accounts: List[AccountConfig] = field(default_factory=list)
     folder_path: str = ""
@@ -124,6 +150,16 @@ class AppConfig:
     filters: FilterConfig = field(default_factory=FilterConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
     geodeep_notes: GeodeepNotesConfig = field(default_factory=GeodeepNotesConfig)
+    answer_templates: List[AnswerTemplate] = field(default_factory=lambda: [
+        AnswerTemplate(
+            name="Default",
+            text="Ahoj, zasílám odpovědi na otázky z listingu:\n[...]\n\nDíky za keš!\n{username}"
+        )
+    ])
+    selected_answer_template: str = "Default"
+    send_answers: bool = False
+    default_answer_source: str = "note"  # "blank", "note", "ai"
+    ai: AiConfig = field(default_factory=AiConfig)
 
 
 class ConfigManager:
@@ -176,7 +212,12 @@ class ConfigManager:
                 "safety": asdict(self.config.safety),
                 "filters": asdict(self.config.filters),
                 "gui": asdict(self.config.gui),
-                "geodeep_notes": asdict(self.config.geodeep_notes)
+                "geodeep_notes": asdict(self.config.geodeep_notes),
+                "answer_templates": [asdict(t) for t in self.config.answer_templates],
+                "selected_answer_template": self.config.selected_answer_template,
+                "send_answers": self.config.send_answers,
+                "default_answer_source": self.config.default_answer_source,
+                "ai": asdict(self.config.ai)
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(raw_dict, f, indent=2, ensure_ascii=False)
@@ -304,6 +345,29 @@ class ConfigManager:
             include_notes=bool(raw_geodeep.get("include_notes", False))
         )
 
+        # Answer Templates
+        raw_ans = data.get("answer_templates", [])
+        ans_templates = []
+        if isinstance(raw_ans, list):
+            for it in raw_ans:
+                if isinstance(it, dict) and "name" in it and "text" in it:
+                    ans_templates.append(AnswerTemplate(name=str(it["name"]), text=str(it["text"])))
+                elif isinstance(it, str):
+                    ans_templates.append(AnswerTemplate(name="Default", text=it))
+        if not ans_templates:
+            ans_templates = AppConfig().answer_templates
+
+        # AI Assistant Config
+        raw_ai = data.get("ai", {})
+        ai_cfg = AiConfig(
+            enabled=bool(raw_ai.get("enabled", False)),
+            provider=str(raw_ai.get("provider", "openai")),
+            api_key=str(raw_ai.get("api_key", "")),
+            model=str(raw_ai.get("model", "gpt-4o-mini")),
+            base_url=str(raw_ai.get("base_url", "")),
+            system_prompt=str(raw_ai.get("system_prompt", AiConfig().system_prompt))
+        )
+
         return AppConfig(
             accounts=accounts,
             folder_path=str(data.get("folder_path", "")),
@@ -312,7 +376,12 @@ class ConfigManager:
             safety=safety,
             filters=filters,
             gui=gui,
-            geodeep_notes=geodeep_notes
+            geodeep_notes=geodeep_notes,
+            answer_templates=ans_templates,
+            selected_answer_template=str(data.get("selected_answer_template", "Default")),
+            send_answers=bool(data.get("send_answers", False)),
+            default_answer_source=str(data.get("default_answer_source", "note")),
+            ai=ai_cfg
         )
 
     def _migrate_legacy_config(self, legacy_path: str) -> None:

@@ -39,6 +39,23 @@
     "include_verified": false,
     "include_notes": false
   },
+  "answer_templates": [
+    {
+      "name": "Default",
+      "text": "Ahoj, zasílám odpovědi na otázky z listingu:\n[...]\n\nDíky za keš!\n{username}"
+    }
+  ],
+  "selected_answer_template": "Default",
+  "send_answers": false,
+  "default_answer_source": "note",
+  "ai": {
+    "enabled": false,
+    "provider": "openai",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "base_url": "",
+    "system_prompt": "Jsi asistent pro geocaching. Tvým úkolem je na základě listingu keše a případné poznámky hráče připravit velmi stručné, věcné odpovědi na otázky k EarthCache nebo Virtual Cache.\nFormátuj odpovědi striktně jako očíslovaný seznam:\n1) ...\n2) ...\n3) ...\nPokud jsou odpovědi nebo nápovědy uvedeny v poznámce hráče, parafrázuj je a zformuluj přesně.\nPokud v poznámce chybí nebo je poznámka prázdná, odvoď/odhadni nejlepší možnou odpověď z informací v listingu.\nNeuváděj žádné úvodní ani závěrečné zdvořilostní fráze (žádné 'Ahoj', žádné 'S pozdravem'), pouze samotné číslované odpovědi."
+  },
   "gui": {
     "theme": "dark",
     "color_theme": "blue"

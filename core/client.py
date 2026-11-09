@@ -67,6 +67,7 @@ class GeocachingClient:
         self.logged_in_username: Optional[str] = None
         self.current_credentials: Optional[Tuple[str, str]] = None
         self._cache_details_cache: Dict[str, Dict[str, Any]] = {}
+        self._message_center_token: Optional[str] = None
 
         self.load_cookies()
 
@@ -1632,5 +1633,196 @@ class GeocachingClient:
             return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
         except Exception as e:
             return False, f"Error promoting draft {clean_ref}: {e}"
+
+    # --------------------------------------------------------------------------
+    # Message Center & Cache Page Information
+    # --------------------------------------------------------------------------
+
+    @staticmethod
+    def _html_to_plain_text(raw_html: str) -> str:
+        if not raw_html:
+            return ""
+        s = raw_html
+        s = re.sub(r"<\s*br\s*/?>", "\n", s, flags=re.IGNORECASE)
+        s = re.sub(r"</\s*p\s*>", "\n\n", s, flags=re.IGNORECASE)
+        s = re.sub(r"</\s*li\s*>", "\n", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*li\s*>", "• ", s, flags=re.IGNORECASE)
+        s = re.sub(r"<[^>]+>", "", s)
+        s = html.unescape(s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        return s.strip()
+
+    def get_cache_page_data(self, gc_code: str) -> Dict[str, Any]:
+        """
+        Fetch cache web page HTML and extract owner GUID, owner name, personal note,
+        and plain-text listing description in a single HTTP request.
+        """
+        clean_code = gc_code.strip().upper()
+        res = {
+            "gccode": clean_code,
+            "owner_guid": "",
+            "owner_name": "",
+            "personal_note": "",
+            "listing_text": "",
+            "cache_name": clean_code
+        }
+        if not self.ensure_valid_session():
+            return res
+
+        try:
+            url = f"{self.BASE_URL}/geocache/{clean_code}"
+            resp = self.session.get(url, timeout=12)
+            if resp.status_code == 200:
+                text = resp.text
+
+                # Owner GUID
+                m_guid = re.search(r'recipientId=([a-f0-9\-]+)&amp;gcCode=', text, re.IGNORECASE)
+                if not m_guid:
+                    m_guid = re.search(r'recipientId=([a-f0-9\-]+)', text, re.IGNORECASE)
+                if m_guid:
+                    res["owner_guid"] = m_guid.group(1)
+
+                # Owner name
+                m_owner = re.search(r'<span class="owner-name"[^>]*>(.*?)</span>', text, re.IGNORECASE)
+                if not m_owner:
+                    m_owner = re.search(r'<div class="owner"[^>]*>.*?by\s+<a[^>]*>(.*?)</a>', text, re.IGNORECASE | re.DOTALL)
+                if m_owner:
+                    res["owner_name"] = html.unescape(re.sub(r'<[^>]+>', '', m_owner.group(1))).strip()
+
+                # Cache name
+                m_name = re.search(r'<span id="ctl00_ContentBody_CacheName"[^>]*>(.*?)</span>', text, re.IGNORECASE)
+                if m_name:
+                    res["cache_name"] = html.unescape(m_name.group(1)).strip()
+
+                # Personal note
+                m_note = re.search(r'id="srOnlyCacheNote"[^>]*>(.*?)</div>', text, re.DOTALL)
+                if m_note:
+                    res["personal_note"] = self._html_to_plain_text(m_note.group(1))
+
+                # Listing plain-text description (short + long)
+                short_m = re.search(r'data-testid="cache-short-description"[^>]*>(.*?)</div>', text, re.DOTALL)
+                if not short_m:
+                    short_m = re.search(r'id="(?:ctl00_ContentBody_ShortDescription|ShortDescription)"[^>]*>(.*?)</div>', text, re.DOTALL)
+
+                long_m = re.search(r'data-testid="cache-long-description"[^>]*>(.*?)</div>\s*<(?:div|section)', text, re.DOTALL)
+                if not long_m:
+                    long_m = re.search(r'id="(?:ctl00_ContentBody_LongDescription|LongDescription)"[^>]*>(.*?)</div>\s*<div', text, re.DOTALL)
+
+                short_plain = self._html_to_plain_text(short_m.group(1)) if short_m else ""
+                long_plain = self._html_to_plain_text(long_m.group(1)) if long_m else ""
+
+                combined_listing = []
+                if short_plain:
+                    combined_listing.append(short_plain)
+                if long_plain:
+                    combined_listing.append(long_plain)
+                res["listing_text"] = "\n\n".join(combined_listing).strip()
+
+        except Exception as e:
+            print(f"Error fetching page data for {clean_code}: {e}")
+
+        # Fallback to cache details if owner_name or cache_name missing
+        if not res["owner_name"] or res["cache_name"] == clean_code:
+            details = self.get_cache_details(clean_code)
+            if details:
+                if not res["owner_name"]:
+                    owner_obj = details.get("owner") or details.get("postedBy") or {}
+                    res["owner_name"] = str(owner_obj.get("userName") or owner_obj.get("username") or "")
+                if res["cache_name"] == clean_code and details.get("name"):
+                    res["cache_name"] = str(details.get("name"))
+
+        return res
+
+    def get_message_center_token(self) -> Optional[str]:
+        """Fetch verification token for Message Center API."""
+        if self._message_center_token:
+            return self._message_center_token
+
+        if not self.ensure_valid_session():
+            return None
+
+        try:
+            url = f"{self.BASE_URL}/account/messagecenter/home/getaccesstoken"
+            headers = {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "User-Agent": self.DEFAULT_USER_AGENT,
+                "Referer": f"{self.BASE_URL}/account/messagecenter"
+            }
+            resp = self.session.post(url, headers=headers, timeout=12)
+            if resp.status_code == 200:
+                token = resp.text.strip().strip('"')
+                if token:
+                    self._message_center_token = token
+                    return token
+        except Exception as e:
+            print(f"Error getting message center token: {e}")
+        return None
+
+    def get_or_create_conversation(self, recipient_guid: str) -> Optional[str]:
+        """
+        Find existing conversation thread with recipient_guid or create a new one.
+        Returns conversation_id or None.
+        """
+        token = self.get_message_center_token()
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": self.DEFAULT_USER_AGENT,
+            "Referer": f"{self.BASE_URL}/account/messagecenter"
+        }
+        if token:
+            headers["X-Verification-Token"] = token
+
+        clean_guid = recipient_guid.strip()
+        try:
+            # Query existing conversation
+            query_url = f"{self.BASE_URL}/api/communication-service/conversation?participantIds={clean_guid}&showHidden=true"
+            resp = self.session.get(query_url, headers=headers, timeout=12)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    conv_id = data[0].get("id")
+                    if conv_id:
+                        return str(conv_id)
+
+            # Create new conversation if not found
+            create_url = f"{self.BASE_URL}/api/communication-service/conversation"
+            body = {"participants": [{"accountId": clean_guid}]}
+            c_resp = self.session.post(create_url, headers=headers, json=body, timeout=12)
+            if c_resp.status_code in (200, 201):
+                c_data = c_resp.json()
+                conv_id = c_data.get("id") if isinstance(c_data, dict) else None
+                if conv_id:
+                    return str(conv_id)
+        except Exception as e:
+            print(f"Error in get_or_create_conversation: {e}")
+        return None
+
+    def send_message_center_message(self, conversation_id: str, message_text: str) -> Tuple[bool, str]:
+        """
+        Send a message to a conversation thread in Geocaching Message Center.
+        Returns (success, message).
+        """
+        token = self.get_message_center_token()
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": self.DEFAULT_USER_AGENT,
+            "Referer": f"{self.BASE_URL}/account/messagecenter"
+        }
+        if token:
+            headers["X-Verification-Token"] = token
+
+        try:
+            url = f"{self.BASE_URL}/api/communication-service/conversation/{conversation_id}/message?mdlinks=true"
+            payload = {"messageText": message_text}
+            resp = self.session.post(url, headers=headers, json=payload, timeout=15)
+            if resp.status_code in (200, 201):
+                return True, "Message sent to cache owner successfully"
+            return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
+        except Exception as e:
+            return False, f"Error sending message: {e}"
+
 
 

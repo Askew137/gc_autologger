@@ -5,10 +5,56 @@ Uses direct tRPC batch communication with safety pacing and live progress report
 """
 
 import time
+import re
 from datetime import datetime
-from typing import List, Callable, Optional, Dict, Any, Set
+from typing import List, Callable, Optional, Dict, Any, Set, Tuple
 from core.client import GeocachingClient
 from core.safety import SafetyManager
+from core.config import AnswerTemplate, AiConfig
+
+
+def extract_answers_from_note(note: str) -> str:
+    """
+    Extract answers from a cache personal note.
+    If the note contains 'Poznámka:' or 'Poznámky:', extracts the text following it.
+    Otherwise returns the entire note text.
+    """
+    if not note:
+        return ""
+    clean = note.strip()
+    m = re.search(r'(?:^|\n)\s*Pozn[aá]mk[ya]?\s*:\s*(.*)$', clean, re.IGNORECASE | re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return clean
+
+
+def format_answer_message(
+    template_text: str,
+    answers: str,
+    username: str = "",
+    gccode: str = "",
+    cache_name: str = ""
+) -> str:
+    """
+    Substitute answers into template placeholder [...] (or {answers}),
+    and replace {username}, {gccode}, {cachename}.
+    """
+    msg = template_text or "[...]"
+    clean_ans = answers.strip() if answers else ""
+    if "[...]" in msg:
+        msg = msg.replace("[...]", clean_ans)
+    elif "{answers}" in msg:
+        msg = msg.replace("{answers}", clean_ans)
+    else:
+        msg = f"{msg.strip()}\n\n{clean_ans}" if clean_ans else msg.strip()
+
+    if "{username}" in msg:
+        msg = msg.replace("{username}", username)
+    if "{gccode}" in msg:
+        msg = msg.replace("{gccode}", gccode)
+    if "{cachename}" in msg:
+        msg = msg.replace("{cachename}", cache_name)
+    return msg.strip()
 
 
 LOG_TYPE_MAP = {
@@ -646,11 +692,19 @@ class CacheLogger:
         on_progress: Optional[Callable[[int, int, float, Optional[float], str], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None,
         checkpoint_manager: Optional[Any] = None,
-        resume: bool = False
+        resume: bool = False,
+        send_answers: bool = False,
+        answer_templates: Optional[List[AnswerTemplate]] = None,
+        selected_template_name: str = "",
+        ai_config: Optional[AiConfig] = None,
+        default_answer_source: str = "note",
+        on_ask_answer: Optional[Callable[[Dict[str, Any]], Tuple[str, str, str]]] = None
     ) -> Dict[str, Any]:
         """
         Fetch all pending log drafts (concepts) from the user's account and promote them
         to published geocache logs one by one with anti-detection pacing.
+        If send_answers is enabled, EarthCache and Virtual Cache concepts pause for user review
+        and send answers via Geocaching Message Center.
         """
         self.safety.reset()
 
@@ -693,6 +747,80 @@ class CacheLogger:
             date_raw = draft.get("loggedDate", "")
             date_display = date_raw[:10] if date_raw else ""
             prefix = f"[{idx}/{total}] {gc_code} ({ref_code})"
+
+            # Check if this cache is an EarthCache or Virtual Cache requiring answers
+            is_earth = self.client.is_earth_cache(gc_code)
+            is_virtual = self.client.is_virtual_cache(gc_code)
+
+            if send_answers and (is_earth or is_virtual) and on_ask_answer:
+                cache_type_name = "EarthCache" if is_earth else "Virtual Cache"
+                log(f"{prefix} Found {cache_type_name} requiring answers. Loading details...", "info")
+                page_data = self.client.get_cache_page_data(gc_code)
+
+                note_content = page_data.get("personal_note", "") or draft.get("note", "")
+                extracted_ans = extract_answers_from_note(note_content)
+                owner_guid = page_data.get("owner_guid", "")
+                owner_name = page_data.get("owner_name", "")
+                listing_text = page_data.get("listing_text", "")
+                cache_name = page_data.get("cache_name") or draft.get("geocacheName", gc_code)
+
+                ask_payload = {
+                    "draft": draft,
+                    "gccode": gc_code,
+                    "name": cache_name,
+                    "cache_type": cache_type_name,
+                    "owner_guid": owner_guid,
+                    "owner_name": owner_name,
+                    "note": note_content,
+                    "extracted_answers": extracted_ans,
+                    "listing": listing_text,
+                    "default_template_name": selected_template_name,
+                    "default_source": default_answer_source
+                }
+
+                action, final_answers, chosen_tmpl_name = on_ask_answer(ask_payload)
+
+                if action == "STOP" or self.safety.is_cancelled:
+                    log(f"{prefix} Submission cancelled by user during answer review.", "warning")
+                    break
+
+                if action == "SEND":
+                    # Locate template text
+                    tmpl_text = ""
+                    if answer_templates:
+                        for tmpl in answer_templates:
+                            if tmpl.name == chosen_tmpl_name:
+                                tmpl_text = tmpl.text
+                                break
+                        if not tmpl_text and answer_templates:
+                            tmpl_text = answer_templates[0].text
+                    if not tmpl_text:
+                        tmpl_text = "[...]"
+
+                    full_message = format_answer_message(
+                        template_text=tmpl_text,
+                        answers=final_answers,
+                        username=self.client.logged_in_username or "",
+                        gccode=gc_code,
+                        cache_name=cache_name
+                    )
+
+                    if owner_guid:
+                        log(f"{prefix} ✉️ Sending answers to owner {owner_name or owner_guid}...", "info")
+                        conv_id = self.client.get_or_create_conversation(owner_guid)
+                        if conv_id:
+                            msg_ok, msg_res = self.client.send_message_center_message(conv_id, full_message)
+                            if msg_ok:
+                                log(f"{prefix} ✉️ Answers successfully sent to owner {owner_name}!", "success")
+                            else:
+                                log(f"{prefix} ⚠️ Failed to send message to owner: {msg_res}", "warning")
+                        else:
+                            log(f"{prefix} ⚠️ Could not establish conversation with owner {owner_name}.", "warning")
+                    else:
+                        log(f"{prefix} ⚠️ Could not determine owner GUID for sending answers.", "warning")
+
+                elif action == "SKIP":
+                    log(f"{prefix} ⏭️ Skipped sending answers to owner as requested.", "info")
 
             # Promote draft to live log
             succ, msg = self.client.promote_log_draft(ref_code)
