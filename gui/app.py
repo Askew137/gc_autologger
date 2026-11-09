@@ -337,14 +337,14 @@ class UltimateApp:
         )
         self.chk_upload_notes.grid(row=0, column=2, padx=15, pady=(8, 4), sticky="w")
 
-        # Row 1: Coordinate mode selector (Complete overwrite / Only unmodified)
-        self.lbl_coords_mode = ctk.CTkLabel(self.coords_opt_frame, text="Coordinate mode:", font=ctk.CTkFont(weight="bold"))
+        # Row 1: Upload mode selector (Complete overwrite / Only unmodified)
+        self.lbl_coords_mode = ctk.CTkLabel(self.coords_opt_frame, text="Upload mode:", font=ctk.CTkFont(weight="bold"))
         self.lbl_coords_mode.grid(row=1, column=0, padx=10, pady=(4, 8), sticky="w")
 
         self.coords_mode_var = ctk.StringVar(value=CoordinateUploader.MODE_OVERWRITE_ALL)
         self.rad_coords_overwrite = ctk.CTkRadioButton(
             self.coords_opt_frame,
-            text="Complete overwrite (upload all coordinates in file)",
+            text="Complete overwrite (always upload / replace on web)",
             variable=self.coords_mode_var,
             value=CoordinateUploader.MODE_OVERWRITE_ALL
         )
@@ -352,7 +352,7 @@ class UltimateApp:
 
         self.rad_coords_unmodified = ctk.CTkRadioButton(
             self.coords_opt_frame,
-            text="Only unmodified (skip caches already corrected on web)",
+            text="Only unmodified (skip caches already set on web)",
             variable=self.coords_mode_var,
             value=CoordinateUploader.MODE_UNMODIFIED_ONLY
         )
@@ -407,15 +407,16 @@ class UltimateApp:
     def _on_coords_options_changed(self):
         upload_coords = self.var_upload_coords.get()
         upload_notes = self.var_upload_notes.get()
+        has_any = upload_coords or upload_notes
 
-        # Toggle coordinate mode radio buttons availability
-        radio_state = "normal" if upload_coords else "disabled"
+        # Toggle upload mode radio buttons availability
+        radio_state = "normal" if has_any else "disabled"
         self.rad_coords_overwrite.configure(state=radio_state)
         self.rad_coords_unmodified.configure(state=radio_state)
-        self.lbl_coords_mode.configure(text_color=theme.TEXT_MAIN if upload_coords else theme.TEXT_MUTED)
+        self.lbl_coords_mode.configure(text_color=theme.TEXT_PRIMARY if has_any else theme.TEXT_MUTED)
 
         # Start button enabled only if at least one checkbox is selected
-        if not upload_coords and not upload_notes:
+        if not has_any:
             self.btn_coords_start.configure(state="disabled")
         elif not self.is_running:
             self.btn_coords_start.configure(state="normal")

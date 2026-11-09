@@ -540,25 +540,8 @@ class GeocachingClient:
         Check if a cache already has user-modified coordinates on Geocaching.com.
         Returns True if already modified, False if unmodified, or None if unknown.
         """
-        try:
-            resp = self.session.get(f"{self.BASE_URL}/geocache/{gc_code}", timeout=10)
-            if resp.status_code == 200:
-                html = resp.text
-                # Cache verification token if present
-                token = self._extract_request_verification_token(html)
-                if token:
-                    self.verification_token = token
-
-                # Groundspeak embeds window.userDefinedCoords with isUserDefined flag:
-                # window.userDefinedCoords = {"status":"success","data":{"isUserDefined":true,...}}
-                match = re.search(r'"isUserDefined"\s*:\s*(true|false)', html, re.IGNORECASE)
-                if match:
-                    return match.group(1).lower() == "true"
-
-                return False
-        except Exception:
-            pass
-        return None
+        status = self.get_cache_user_status(gc_code)
+        return status.get("is_coords_modified")
 
     def upload_personal_note(self, gc_code: str, note: str) -> Tuple[bool, str]:
         """
@@ -616,6 +599,16 @@ class GeocachingClient:
         Check if a cache already has a personal note on Geocaching.com.
         Returns True if note exists, False if none, or None if unknown.
         """
+        status = self.get_cache_user_status(gc_code)
+        return status.get("has_personal_note")
+
+    def get_cache_user_status(self, gc_code: str) -> Dict[str, Optional[bool]]:
+        """
+        Fetch cache listing once and determine both modified coordinates status
+        and personal cache note existence in a single HTTP request.
+        Returns: {'is_coords_modified': bool|None, 'has_personal_note': bool|None}
+        """
+        status = {"is_coords_modified": None, "has_personal_note": None}
         try:
             resp = self.session.get(f"{self.BASE_URL}/geocache/{gc_code}", timeout=10)
             if resp.status_code == 200:
@@ -624,15 +617,24 @@ class GeocachingClient:
                 if token:
                     self.verification_token = token
 
-                match = re.search(r'<div id="srOnlyCacheNote"[^>]*>(.*?)</div>', html_text, re.DOTALL)
-                if match and match.group(1).strip():
-                    return True
-                if 'id="viewCacheNote"' in html_text and 'class="formatted"' in html_text:
-                    return True
-                return False
+                # 1. Coordinates modified check
+                match_coords = re.search(r'"isUserDefined"\s*:\s*(true|false)', html_text, re.IGNORECASE)
+                if match_coords:
+                    status["is_coords_modified"] = (match_coords.group(1).lower() == "true")
+                else:
+                    status["is_coords_modified"] = False
+
+                # 2. Personal note existence check
+                match_note = re.search(r'<div id="srOnlyCacheNote"[^>]*>(.*?)</div>', html_text, re.DOTALL)
+                if match_note and match_note.group(1).strip():
+                    status["has_personal_note"] = True
+                elif 'id="viewCacheNote"' in html_text and 'class="formatted"' in html_text:
+                    status["has_personal_note"] = True
+                else:
+                    status["has_personal_note"] = False
         except Exception:
             pass
-        return None
+        return status
 
     # --------------------------------------------------------------------------
     # Cache Logging API (tRPC batch endpoints as in c:geo GCLogAPI.java)

@@ -164,15 +164,18 @@ class CoordinateUploader:
                         on_progress(idx, total, percent, None, item)
                     continue
 
+            # Query web status if UNMODIFIED_ONLY mode is active
+            user_status = None
+            if mode == self.MODE_UNMODIFIED_ONLY and (upload_coords or (upload_notes and getattr(item, "note", ""))):
+                user_status = self.client.get_cache_user_status(item.gccode)
+
             # 1. Coordinate upload handling (if enabled)
             coords_status = None  # None = disabled, "SKIPPED", "SUCCESS", "FAILED"
             coords_msg = ""
             if upload_coords:
-                if mode == self.MODE_UNMODIFIED_ONLY:
-                    is_modified = self.client.has_modified_coordinates(item.gccode)
-                    if is_modified is True:
-                        coords_status = "SKIPPED"
-                        coords_msg = "Coordinates already modified on web"
+                if mode == self.MODE_UNMODIFIED_ONLY and user_status and user_status.get("is_coords_modified") is True:
+                    coords_status = "SKIPPED"
+                    coords_msg = "Coordinates already modified on web"
 
                 if coords_status is None:
                     c_succ, c_msg = self.client.upload_coordinates(item.gccode, item.lat, item.lon)
@@ -184,12 +187,15 @@ class CoordinateUploader:
                         coords_msg = c_msg
 
             # 2. Personal note upload handling (if enabled)
-            note_status = None  # None = disabled, "SKIPPED_EMPTY", "SUCCESS", "FAILED"
+            note_status = None  # None = disabled, "SKIPPED_EMPTY", "SKIPPED_EXISTS", "SUCCESS", "FAILED"
             note_msg = ""
             if upload_notes:
                 if not getattr(item, "note", ""):
                     note_status = "SKIPPED_EMPTY"
                     note_msg = "No note in GPX"
+                elif mode == self.MODE_UNMODIFIED_ONLY and user_status and user_status.get("has_personal_note") is True:
+                    note_status = "SKIPPED_EXISTS"
+                    note_msg = "Personal note already exists on web"
                 else:
                     n_succ, n_msg = self.client.upload_personal_note(item.gccode, item.note)
                     if n_succ:
@@ -203,7 +209,7 @@ class CoordinateUploader:
             has_failed = (coords_status == "FAILED" or note_status == "FAILED")
             all_skipped = (
                 (coords_status in (None, "SKIPPED"))
-                and (note_status in (None, "SKIPPED_EMPTY"))
+                and (note_status in (None, "SKIPPED_EMPTY", "SKIPPED_EXISTS"))
                 and coords_status != "SUCCESS"
                 and note_status != "SUCCESS"
             )
@@ -221,6 +227,8 @@ class CoordinateUploader:
             if upload_notes:
                 if note_status == "SUCCESS":
                     log_parts.append("📝 Note uploaded")
+                elif note_status == "SKIPPED_EXISTS":
+                    log_parts.append("⏭️ Note already exists on web")
                 elif note_status == "SKIPPED_EMPTY":
                     log_parts.append("(no note in GPX)")
                 elif note_status == "FAILED":
@@ -244,7 +252,7 @@ class CoordinateUploader:
                 skipped_count += 1
                 if self.checkpoint_manager:
                     self.checkpoint_manager.record_coord_item(item.gccode, success=True)
-                log(combined_msg, "warning" if coords_status == "SKIPPED" else "info")
+                log(combined_msg, "warning" if (coords_status == "SKIPPED" or note_status == "SKIPPED_EXISTS") else "info")
             else:
                 success_count += 1
                 if self.checkpoint_manager:
