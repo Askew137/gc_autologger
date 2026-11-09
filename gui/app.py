@@ -451,7 +451,7 @@ class UltimateApp:
         self.logger_mode_var = ctk.StringVar(value="CREATE")
         self.logger_mode_seg = ctk.CTkSegmentedButton(
             mode_frame,
-            values=["Create logs", "Edit logs", "Delete logs", "Send concepts"],
+            values=["Create logs", "Edit logs", "Delete logs", "Send drafts"],
             command=self._on_logger_mode_changed
         )
         self.logger_mode_seg.set("Create logs")
@@ -463,12 +463,12 @@ class UltimateApp:
         log_grid.grid_columnconfigure(1, weight=1, uniform="col")
         log_grid.grid_rowconfigure(0, weight=1)
 
-        # Left side: inputs & concept settings (locked to 50% width via uniform="col")
+        # Left side: inputs & draft settings (locked to 50% width via uniform="col")
         self.logger_left_box = ctk.CTkFrame(log_grid)
         self.logger_left_box.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.logger_left_box.grid_columnconfigure(1, weight=1)
 
-        # Delete mode informational frame (shown only in Delete mode)
+        # Delete mode informational frame (shown only in Delete mode, left-aligned)
         self.frame_delete_info = ctk.CTkFrame(
             self.logger_left_box,
             fg_color="#3b1d1d",
@@ -476,15 +476,20 @@ class UltimateApp:
             border_color="#ef4444",
             corner_radius=6
         )
-        ctk.CTkLabel(
+        self.lbl_delete_info = ctk.CTkLabel(
             self.frame_delete_info,
-            text="Delete Mode:\nPermanently deletes your existing logs on Geocaching.com\nfor all listed GC codes.\n\nNo date, type, or log text input required.",
+            text="Delete Mode:\n\n"
+                 "Permanently deletes your existing logs on Geocaching.com\n"
+                 "for all listed GC codes.\n\n"
+                 "• No date, type, or log text input required.",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#fca5a5",
-            justify="left"
-        ).pack(padx=16, pady=20)
+            justify="left",
+            anchor="w"
+        )
+        self.lbl_delete_info.pack(fill="x", padx=16, pady=16, anchor="w")
 
-        # Send concepts mode informational frame (top of left box)
+        # Send drafts mode informational frame (top of left box, left-aligned)
         self.frame_concepts_info = ctk.CTkFrame(
             self.logger_left_box,
             fg_color="#182234",
@@ -492,18 +497,21 @@ class UltimateApp:
             border_color="#38bdf8",
             corner_radius=6
         )
-        ctk.CTkLabel(
+        self.frame_drafts_info = self.frame_concepts_info
+        self.lbl_drafts_info = ctk.CTkLabel(
             self.frame_concepts_info,
-            text="Send Concepts (Drafts) Mode:\n\n"
+            text="Send Drafts Mode:\n\n"
                  "Automatically fetches all pending log drafts from your\n"
                  "Geocaching.com account and submits them as official logs.\n\n"
                  "• Dates, log types, and notes written in the field\n"
                  "  are preserved exactly as recorded.\n\n"
-                 "Click Start below to begin sending concepts.",
+                 "Click Start below to begin sending drafts.",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#bae6fd",
-            justify="left"
-        ).pack(padx=16, pady=14)
+            justify="left",
+            anchor="w"
+        )
+        self.lbl_drafts_info.pack(fill="x", padx=16, pady=14, anchor="w")
 
         # Single checkbox placed directly under the blue frame
         self.chk_send_answers = ctk.CTkCheckBox(
@@ -566,22 +574,50 @@ class UltimateApp:
             font=ctk.CTkFont(size=13, weight="bold")
         ).pack(side="left", pady=10)
 
-        self.txt_gc_codes = ctk.CTkTextbox(self.frame_gc_codes_input, wrap="word")
-        self.txt_gc_codes.pack(fill="both", expand=True, padx=10, pady=4)
-
         btn_row = ctk.CTkFrame(self.frame_gc_codes_input, fg_color="transparent")
-        btn_row.pack(fill="x", padx=10, pady=(4, 8))
+        btn_row.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
         ctk.CTkButton(btn_row, text="Import from GPX", width=120, height=34, command=self._import_codes_from_file).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Import from List", width=120, height=34, command=lambda: self._open_gc_list_import_dialog("bulk")).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Clear codes", width=90, height=34, fg_color=theme.CARD_BORDER, command=lambda: self.txt_gc_codes.delete("1.0", "end")).pack(side="left", padx=4)
+
+        self.txt_gc_codes = ctk.CTkTextbox(self.frame_gc_codes_input, wrap="word")
+        self.txt_gc_codes.pack(side="top", fill="both", expand=True, padx=10, pady=4)
 
         # Answers Approval Panel:
         # Left Side (inside logger_left_box under the checkbox): Template Selector, Answers Editor, Action Buttons
         self.frame_approval_left = ctk.CTkFrame(self.logger_left_box, fg_color="transparent")
 
+        # Bottom Row: View Listing & Notes + Copy to Clipboard (anchored to bottom to align with Send answer & Log)
+        clip_row = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
+        clip_row.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
+
+        self.btn_view_listing = ctk.CTkButton(
+            clip_row,
+            text="View listing and notes",
+            font=ctk.CTkFont(weight="bold", size=13),
+            height=34,
+            fg_color="#0d9488",
+            hover_color="#0f766e",
+            state="disabled",
+            command=self._open_listing_and_notes_dialog
+        )
+        self.btn_view_listing.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        self.btn_copy_listing = ctk.CTkButton(
+            clip_row,
+            text="Copy to clipboard",
+            font=ctk.CTkFont(weight="bold", size=13),
+            height=34,
+            fg_color="#4f46e5",
+            hover_color="#4338ca",
+            state="disabled",
+            command=self._on_copy_listing_to_clipboard
+        )
+        self.btn_copy_listing.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
         # 1. Template Selector Row
         tmpl_sel_row = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
-        tmpl_sel_row.pack(fill="x", padx=4, pady=(4, 6))
+        tmpl_sel_row.pack(side="top", fill="x", padx=10, pady=(4, 4))
         ctk.CTkLabel(tmpl_sel_row, text="Template:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 6))
         ans_tmpl_names = [t.name for t in self.config.answer_templates] or ["Default"]
         self.combo_answer_templates = ctk.CTkComboBox(
@@ -596,17 +632,18 @@ class UltimateApp:
             self.combo_answer_templates.set(ans_tmpl_names[0])
         self.combo_answer_templates.pack(side="left")
 
-        # 2. Answers Editor Area (left side)
-        ctk.CTkLabel(
+        # 2. Answers Editor Area (left side, expands all the way down to bottom buttons)
+        self.lbl_ans_title = ctk.CTkLabel(
             self.frame_approval_left,
             text="Answers (replaces [...] in template):",
-            font=ctk.CTkFont(size=12, weight="bold")
-        ).pack(anchor="w", padx=4, pady=(2, 2))
+            font=ctk.CTkFont(weight="bold")
+        )
+        self.lbl_ans_title.pack(side="top", anchor="w", padx=10, pady=(4, 2))
 
         ans_editor_frame = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
-        ans_editor_frame.pack(fill="both", expand=True, padx=4, pady=(0, 6))
+        ans_editor_frame.pack(side="top", fill="both", expand=True, padx=10, pady=(2, 4))
 
-        self.txt_approval_answers = ctk.CTkTextbox(ans_editor_frame, height=115, wrap="word")
+        self.txt_approval_answers = ctk.CTkTextbox(ans_editor_frame, wrap="word")
         self.txt_approval_answers.pack(side="left", fill="both", expand=True)
         self.txt_approval_answers.bind("<KeyRelease>", lambda e: self._update_approval_preview())
 
@@ -623,7 +660,7 @@ class UltimateApp:
             hover_color="#334155",
             command=self._on_ans_blank_clicked
         )
-        self.btn_ans_blank.pack(pady=3)
+        self.btn_ans_blank.pack(side="top", pady=3)
 
         self.btn_ans_note = ctk.CTkButton(
             ans_btn_stack,
@@ -634,7 +671,7 @@ class UltimateApp:
             hover_color=theme.ACCENT_BLUE_HOVER,
             command=self._on_ans_note_clicked
         )
-        self.btn_ans_note.pack(pady=3)
+        self.btn_ans_note.pack(side="top", pady=3)
 
         self.btn_ans_ai = ctk.CTkButton(
             ans_btn_stack,
@@ -645,54 +682,26 @@ class UltimateApp:
             hover_color="#7c3aed",
             command=self._on_ans_ai_clicked
         )
-        self.btn_ans_ai.pack(pady=3)
-
-        # 3. View Listing & Notes + Copy to Clipboard Row
-        clip_row = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
-        clip_row.pack(fill="x", padx=4, pady=(2, 6))
-
-        self.btn_view_listing = ctk.CTkButton(
-            clip_row,
-            text="View listing and notes",
-            font=ctk.CTkFont(weight="bold"),
-            height=32,
-            fg_color="#0d9488",
-            hover_color="#0f766e",
-            state="disabled",
-            command=self._open_listing_and_notes_dialog
-        )
-        self.btn_view_listing.pack(side="left", fill="x", expand=True, padx=(0, 4))
-
-        self.btn_copy_listing = ctk.CTkButton(
-            clip_row,
-            text="Copy to clipboard",
-            font=ctk.CTkFont(weight="bold"),
-            height=32,
-            fg_color="#4f46e5",
-            hover_color="#4338ca",
-            state="disabled",
-            command=self._on_copy_listing_to_clipboard
-        )
-        self.btn_copy_listing.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        self.btn_ans_ai.pack(side="top", pady=3)
 
         # Right Side (inside logger_right_box): Cache Header, Message Preview, and Send/Skip Buttons
         self.frame_approval_right = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
         self.frame_answers_approval = self.frame_approval_right  # Alias for backward compatibility
 
-        # Top Header Card (height 48 matching gc_hdr_frame)
+        # Top Header Card (height 68 to comfortably fit 2 lines without clipping descenders)
         self.frame_approval_header = ctk.CTkFrame(
             self.frame_approval_right,
             fg_color="#182234",
             border_width=1,
             border_color="#334155",
             corner_radius=6,
-            height=48
+            height=68
         )
-        self.frame_approval_header.pack(fill="x", padx=10, pady=(6, 4))
+        self.frame_approval_header.pack(side="top", fill="x", padx=10, pady=(6, 4))
         self.frame_approval_header.pack_propagate(False)
 
         hdr_row1 = ctk.CTkFrame(self.frame_approval_header, fg_color="transparent")
-        hdr_row1.pack(fill="x", padx=10, pady=(3, 1))
+        hdr_row1.pack(fill="x", padx=12, pady=(8, 2))
 
         hand_cur = "pointinghand" if sys.platform == "darwin" else "hand2"
 
@@ -716,7 +725,7 @@ class UltimateApp:
 
         self.lbl_appr_name = ctk.CTkLabel(
             hdr_row1,
-            text="Waiting for EarthCache / Virtual Cache concepts...",
+            text="Waiting for EarthCache / Virtual Cache drafts...",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#94a3b8",
             anchor="w"
@@ -728,19 +737,19 @@ class UltimateApp:
         self.lbl_approval_cache_info = self.lbl_appr_name
 
         hdr_row2 = ctk.CTkFrame(self.frame_approval_header, fg_color="transparent")
-        hdr_row2.pack(fill="x", padx=10, pady=(0, 3))
+        hdr_row2.pack(fill="x", padx=12, pady=(2, 8))
 
         self.lbl_appr_owner_label = ctk.CTkLabel(
             hdr_row2,
             text="Owner: ",
-            font=ctk.CTkFont(size=11),
+            font=ctk.CTkFont(size=12),
             text_color=theme.TEXT_MUTED
         )
 
         self.lbl_appr_owner_val = ctk.CTkLabel(
             hdr_row2,
             text="",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#38bdf8",
             cursor=hand_cur
         )
@@ -748,27 +757,9 @@ class UltimateApp:
         self.lbl_appr_owner_val.bind("<Enter>", lambda e: self.lbl_appr_owner_val.configure(text_color="#7dd3fc"))
         self.lbl_appr_owner_val.bind("<Leave>", lambda e: self.lbl_appr_owner_val.configure(text_color="#38bdf8"))
 
-        self.lbl_appr_preview_title = ctk.CTkLabel(
-            hdr_row2,
-            text="Message preview",
-            font=ctk.CTkFont(size=11),
-            text_color=theme.TEXT_MUTED
-        )
-        self.lbl_appr_preview_title.pack(side="right")
-
-        # Textbox (identical packing to txt_gc_codes!)
-        self.txt_approval_preview = ctk.CTkTextbox(
-            self.frame_approval_right,
-            wrap="word",
-            fg_color="#181c24",
-            text_color="#e2e8f0"
-        )
-        self.txt_approval_preview.pack(fill="both", expand=True, padx=10, pady=4)
-        self.txt_approval_preview.configure(state="disabled")
-
-        # Bottom Action Buttons Row (identical packing to btn_row in GC codes!)
+        # Bottom Action Buttons Row (anchored to bottom to align with View listing and notes)
         approval_btn_row = ctk.CTkFrame(self.frame_approval_right, fg_color="transparent")
-        approval_btn_row.pack(fill="x", padx=10, pady=(4, 8))
+        approval_btn_row.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
 
         self.btn_send_answer = ctk.CTkButton(
             approval_btn_row,
@@ -793,6 +784,24 @@ class UltimateApp:
             command=self._on_approve_skip_clicked
         )
         self.btn_skip_answer.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Message preview label (between cache info card and preview textbox, bold font like Template:)
+        self.lbl_appr_preview_title = ctk.CTkLabel(
+            self.frame_approval_right,
+            text="Message preview:",
+            font=ctk.CTkFont(weight="bold")
+        )
+        self.lbl_appr_preview_title.pack(side="top", anchor="w", padx=10, pady=(6, 2))
+
+        # Preview Textbox (expands to fill vertical space between label and bottom buttons)
+        self.txt_approval_preview = ctk.CTkTextbox(
+            self.frame_approval_right,
+            wrap="word",
+            fg_color="#181c24",
+            text_color="#e2e8f0"
+        )
+        self.txt_approval_preview.pack(side="top", fill="both", expand=True, padx=10, pady=(2, 4))
+        self.txt_approval_preview.configure(state="disabled")
 
         # Resume banner frame (shown if an unfinished logging run is detected)
         self.frame_resume_logging = ctk.CTkFrame(
@@ -871,20 +880,22 @@ class UltimateApp:
     def _on_logger_mode_changed(self, mode_val: str):
         # Manage right box content: frame_gc_codes_input vs frame_approval_right
         if hasattr(self, "frame_gc_codes_input") and hasattr(self, "frame_approval_right"):
-            if mode_val == "Send concepts":
+            if mode_val in ("Send drafts", "Send concepts"):
                 self.frame_gc_codes_input.pack_forget()
                 self.frame_approval_right.pack(fill="both", expand=True)
             else:
                 self.frame_approval_right.pack_forget()
                 self.frame_gc_codes_input.pack(fill="both", expand=True)
 
-        # Remove concepts specific widgets from left box by default
+        # Remove drafts specific widgets from left box by default
         if hasattr(self, "frame_concepts_info"):
             self.frame_concepts_info.grid_remove()
         if hasattr(self, "chk_send_answers"):
             self.chk_send_answers.grid_remove()
         if hasattr(self, "frame_approval_left"):
             self.frame_approval_left.grid_remove()
+        if hasattr(self, "logger_left_box"):
+            self.logger_left_box.grid_rowconfigure(2, weight=0)
 
         if mode_val == "Create logs":
             self.logger_mode_var.set("CREATE")
@@ -954,7 +965,7 @@ class UltimateApp:
             self.lbl_log_msg.grid_remove()
             self.txt_log_message.grid_remove()
 
-            self.frame_delete_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
+            self.frame_delete_info.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 6), sticky="ew")
 
             self.btn_log_start.configure(
                 text="▶ Delete logs",
@@ -962,8 +973,8 @@ class UltimateApp:
                 hover_color=theme.ACCENT_RED_HOVER
             )
 
-        elif mode_val == "Send concepts":
-            self.logger_mode_var.set("CONCEPTS")
+        elif mode_val in ("Send drafts", "Send concepts"):
+            self.logger_mode_var.set("DRAFTS")
             self.frame_delete_info.grid_remove()
             self.lbl_log_type.grid_remove()
             self.combo_log_type.grid_remove()
@@ -974,19 +985,21 @@ class UltimateApp:
             self.lbl_log_msg.grid_remove()
             self.txt_log_message.grid_remove()
 
-            # Show concepts info box at top of left side
+            # Show drafts info box at top of left side
             self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 6), sticky="ew")
             # Show the ONE checkbox directly under the blue frame
-            self.chk_send_answers.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 8), sticky="w")
+            self.chk_send_answers.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 6), sticky="w")
 
             # Show answers approval panel under checkbox if send_answers is checked
             if self.var_send_answers.get():
-                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=6, pady=0, sticky="nsew")
+                self.logger_left_box.grid_rowconfigure(2, weight=1)
+                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
             else:
+                self.logger_left_box.grid_rowconfigure(2, weight=0)
                 self.frame_approval_left.grid_remove()
 
             self.btn_log_start.configure(
-                text="▶ Start sending concepts",
+                text="▶ Start sending drafts",
                 fg_color=theme.ACCENT_GREEN,
                 hover_color=theme.ACCENT_GREEN_HOVER
             )
@@ -2562,8 +2575,8 @@ class UltimateApp:
 
         mode = self.logger_mode_var.get() if hasattr(self, "logger_mode_var") else "CREATE"
 
-        # 0. CONCEPTS Mode (Send concepts)
-        if mode == "CONCEPTS":
+        # 0. DRAFTS Mode (Send drafts)
+        if mode in ("DRAFTS", "CONCEPTS"):
             self.is_running = True
             self.btn_log_start.configure(state="disabled")
             self.btn_log_pause.configure(state="normal", text="⏸ Pause")
@@ -2572,13 +2585,13 @@ class UltimateApp:
 
             logger = CacheLogger(self.client, self.safety)
 
-            def on_progress_concepts(idx, total, pct, eta, gc_code):
-                self.root.after(0, lambda: self._update_progress_ui(idx, total, pct, eta, f"Sending concept {gc_code}"))
+            def on_progress_drafts(idx, total, pct, eta, gc_code):
+                self.root.after(0, lambda: self._update_progress_ui(idx, total, pct, eta, f"Sending draft {gc_code}"))
 
-            def worker_concepts():
+            def worker_drafts():
                 try:
                     res = logger.run_send_concepts(
-                        on_progress=on_progress_concepts,
+                        on_progress=on_progress_drafts,
                         on_log=self.log,
                         send_answers=self.var_send_answers.get(),
                         answer_templates=self.config.answer_templates,
@@ -2588,16 +2601,16 @@ class UltimateApp:
                         on_ask_answer=self._on_worker_ask_answer
                     )
                     self.root.after(0, self._reset_controls)
-                    self.root.after(0, lambda: self._on_operation_done("Send concepts", res))
+                    self.root.after(0, lambda: self._on_operation_done("Send drafts", res))
                 except Exception as e:
-                    self.log(f"Error during sending concepts: {e}", "error")
+                    self.log(f"Error during sending drafts: {e}", "error")
                     self.root.after(0, self._reset_controls)
-                    self.root.after(0, lambda: self._on_operation_error("Send concepts", str(e)))
+                    self.root.after(0, lambda: self._on_operation_error("Send drafts", str(e)))
                 finally:
                     self.root.after(0, self._reset_controls)
                     self.root.after(0, self._reset_approval_panel_to_idle)
 
-            threading.Thread(target=worker_concepts, daemon=True).start()
+            threading.Thread(target=worker_drafts, daemon=True).start()
             return
 
         raw_text = self.txt_gc_codes.get("1.0", "end").strip()
@@ -3849,10 +3862,12 @@ class UltimateApp:
         val = self.var_send_answers.get()
         self.config.send_answers = val
         self.config_mgr.save()
-        if self.logger_mode_var.get() == "CONCEPTS":
+        if self.logger_mode_var.get() in ("DRAFTS", "CONCEPTS"):
             if val:
-                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=6, pady=0, sticky="nsew")
+                self.logger_left_box.grid_rowconfigure(2, weight=1)
+                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
             else:
+                self.logger_left_box.grid_rowconfigure(2, weight=0)
                 self.frame_approval_left.grid_remove()
 
     def _on_approval_template_changed(self, choice: str):
@@ -4207,7 +4222,7 @@ class UltimateApp:
         if hasattr(self, "lbl_appr_name"):
             self.lbl_appr_name.pack_forget()
             self.lbl_appr_name.configure(
-                text="Waiting for EarthCache / Virtual Cache concepts...",
+                text="Waiting for EarthCache / Virtual Cache drafts...",
                 text_color="#94a3b8"
             )
             self.lbl_appr_name.pack(side="left", fill="x", expand=True)
