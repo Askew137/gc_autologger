@@ -759,8 +759,22 @@ class CacheLogger:
                 log(f"{prefix} Found {cache_type_name} requiring answers. Loading details...", "info")
                 page_data = self.client.get_cache_page_data(gc_code)
 
-                note_content = page_data.get("personal_note", "") or draft.get("note", "")
-                extracted_ans = extract_answers_from_note(note_content)
+                personal_note = (page_data.get("personal_note") or "").strip()
+                draft_log_text = (draft.get("note") or "").strip()
+
+                # Determine answers source: prefer cache personal note on web
+                if personal_note:
+                    note_content = personal_note
+                    extracted_ans = extract_answers_from_note(personal_note)
+                elif draft_log_text and re.search(r'(?:^|\n)\s*Pozn[aá]mk[ya]?\s*:', draft_log_text, re.IGNORECASE):
+                    # Only fallback to draft text if it explicitly contains the 'Poznámka:' marker
+                    note_content = draft_log_text
+                    extracted_ans = extract_answers_from_note(draft_log_text)
+                else:
+                    # Do not treat plain log text (e.g. "Díky za keš!") as answers to the owner
+                    note_content = personal_note
+                    extracted_ans = ""
+
                 owner_guid = page_data.get("owner_guid", "")
                 owner_name = page_data.get("owner_name", "")
                 listing_text = page_data.get("listing_text", "")
