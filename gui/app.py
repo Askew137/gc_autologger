@@ -3385,7 +3385,7 @@ class UltimateApp:
         note = self._current_approval_data.get("note", "")
 
         self.txt_approval_answers.delete("1.0", "end")
-        self.txt_approval_answers.insert("1.0", "⏳ Generuji odpovědi pomocí AI...")
+        self.txt_approval_answers.insert("1.0", "⏳ Generuji odpovědi pomocí AI (na clusteru může trvat 30–60 s)...")
         self.txt_approval_answers.configure(state="disabled")
         self.btn_send_answer.configure(state="disabled")
         self.btn_skip_answer.configure(state="disabled")

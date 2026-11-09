@@ -37,7 +37,7 @@ class AiService:
             f"Formátuj pouze jako číslovaný seznam: 1) ... 2) ... 3) ... Bez zdvořilostních frází."
         )
 
-        return AiService._call_provider(config, user_content)
+        return AiService._call_provider(config, user_content, timeout=120)
 
     @staticmethod
     def test_connection(config: AiConfig) -> Tuple[bool, str]:
@@ -49,14 +49,14 @@ class AiService:
             return False, "API key cannot be empty."
 
         test_prompt = "Odpověz jedním slovem: OK"
-        ok, res = AiService._call_provider(config, test_prompt, timeout=12)
+        ok, res = AiService._call_provider(config, test_prompt, timeout=30)
         if ok:
             clean_res = res.replace("\n", " ").strip()
             return True, f"Connection successful! Response: '{clean_res[:60]}'"
         return False, res
 
     @staticmethod
-    def _call_provider(config: AiConfig, user_content: str, timeout: int = 25) -> Tuple[bool, str]:
+    def _call_provider(config: AiConfig, user_content: str, timeout: int = 120) -> Tuple[bool, str]:
         provider = (config.provider or "openai").lower().strip()
 
         try:
