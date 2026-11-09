@@ -10,6 +10,8 @@ import time
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
+import webbrowser
+import urllib.parse
 
 try:
     import customtkinter as ctk
@@ -455,6 +457,15 @@ class UltimateApp:
         self.logger_mode_seg.set("Create logs")
         self.logger_mode_seg.pack(side="left")
 
+        self.chk_send_answers = ctk.CTkCheckBox(
+            mode_frame,
+            text="Send answers to cache owners (EarthCache / Virtual)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            variable=self.var_send_answers,
+            command=self._on_toggle_send_answers
+        )
+        # Packed when Send concepts mode is selected
+
         log_grid = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
         log_grid.pack(fill="both", expand=True, padx=8, pady=4)
 
@@ -478,7 +489,7 @@ class UltimateApp:
             justify="left"
         ).pack(padx=16, pady=20)
 
-        # Send concepts mode informational frame (shown only in Send concepts mode)
+        # Send concepts mode informational frame (shown only in Send concepts mode when send_answers is off)
         self.frame_concepts_info = ctk.CTkFrame(
             self.logger_left_box,
             fg_color="#182234",
@@ -499,14 +510,14 @@ class UltimateApp:
             justify="left"
         ).pack(padx=20, pady=(20, 10))
 
-        self.chk_send_answers = ctk.CTkCheckBox(
+        self.chk_send_answers_info = ctk.CTkCheckBox(
             self.frame_concepts_info,
             text="Send answers to cache owners (EarthCache / Virtual)",
             font=ctk.CTkFont(size=12, weight="bold"),
             variable=self.var_send_answers,
             command=self._on_toggle_send_answers
         )
-        self.chk_send_answers.pack(anchor="w", padx=20, pady=(0, 20))
+        self.chk_send_answers_info.pack(anchor="w", padx=20, pady=(0, 20))
 
         # Log Type
         self.lbl_log_type = ctk.CTkLabel(self.logger_left_box, text="Log type:", font=ctk.CTkFont(weight="bold"))
@@ -561,22 +572,71 @@ class UltimateApp:
         ctk.CTkButton(btn_row, text="Import from List", width=120, command=lambda: self._open_gc_list_import_dialog("bulk")).pack(side="left", padx=4)
         ctk.CTkButton(btn_row, text="Clear codes", width=90, fg_color=theme.CARD_BORDER, command=lambda: self.txt_gc_codes.delete("1.0", "end")).pack(side="left", padx=4)
 
-        # Answers Approval Panel (shown when Send concepts + Send answers is active)
-        self.frame_answers_approval = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
+        # Answers Approval Panel:
+        # Left Side (inside logger_left_box): Header Card, Template Selector, Answers Editor, Action Buttons
+        self.frame_approval_left = ctk.CTkFrame(self.logger_left_box, fg_color="transparent")
 
-        # 1. Header Card
-        self.lbl_approval_cache_info = ctk.CTkLabel(
-            self.frame_answers_approval,
-            text="⏳ Waiting for EarthCache / Virtual Cache concepts...",
+        # 1. Header Card (GC code link, Cache Title, Owner link) - without emojis
+        self.frame_approval_header = ctk.CTkFrame(
+            self.frame_approval_left,
+            fg_color="#182234",
+            border_width=1,
+            border_color="#334155",
+            corner_radius=6
+        )
+        self.frame_approval_header.pack(fill="x", padx=8, pady=(4, 6))
+
+        hdr_row1 = ctk.CTkFrame(self.frame_approval_header, fg_color="transparent")
+        hdr_row1.pack(fill="x", padx=10, pady=(6, 2))
+
+        hand_cur = "pointinghand" if sys.platform == "darwin" else "hand2"
+
+        self.lbl_appr_gccode = ctk.CTkLabel(
+            hdr_row1,
+            text="",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#38bdf8",
-            justify="left",
+            cursor=hand_cur
+        )
+        self.lbl_appr_gccode.bind("<Button-1>", lambda e: self._open_current_cache_in_browser())
+        self.lbl_appr_gccode.bind("<Enter>", lambda e: self.lbl_appr_gccode.configure(text_color="#7dd3fc"))
+        self.lbl_appr_gccode.bind("<Leave>", lambda e: self.lbl_appr_gccode.configure(text_color="#38bdf8"))
+
+        self.lbl_appr_title = ctk.CTkLabel(
+            hdr_row1,
+            text="Waiting for EarthCache / Virtual Cache concepts...",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#94a3b8",
             anchor="w"
         )
-        self.lbl_approval_cache_info.pack(fill="x", padx=8, pady=(4, 6))
+        self.lbl_appr_title.pack(side="left", fill="x", expand=True)
+
+        # Alias for backward compatibility
+        self.lbl_approval_cache_info = self.lbl_appr_title
+
+        hdr_row2 = ctk.CTkFrame(self.frame_approval_header, fg_color="transparent")
+        hdr_row2.pack(fill="x", padx=10, pady=(0, 6))
+
+        self.lbl_appr_owner_label = ctk.CTkLabel(
+            hdr_row2,
+            text="Owner: ",
+            font=ctk.CTkFont(size=12),
+            text_color=theme.TEXT_MUTED
+        )
+
+        self.lbl_appr_owner_val = ctk.CTkLabel(
+            hdr_row2,
+            text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#38bdf8",
+            cursor=hand_cur
+        )
+        self.lbl_appr_owner_val.bind("<Button-1>", lambda e: self._open_current_owner_in_browser())
+        self.lbl_appr_owner_val.bind("<Enter>", lambda e: self.lbl_appr_owner_val.configure(text_color="#7dd3fc"))
+        self.lbl_appr_owner_val.bind("<Leave>", lambda e: self.lbl_appr_owner_val.configure(text_color="#38bdf8"))
 
         # 2. Template Selector Row
-        tmpl_sel_row = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
+        tmpl_sel_row = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
         tmpl_sel_row.pack(fill="x", padx=8, pady=(0, 6))
         ctk.CTkLabel(tmpl_sel_row, text="Template:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 6))
         ans_tmpl_names = [t.name for t in self.config.answer_templates] or ["Default"]
@@ -592,111 +652,135 @@ class UltimateApp:
             self.combo_answer_templates.set(ans_tmpl_names[0])
         self.combo_answer_templates.pack(side="left")
 
-        # 3. Answers Editor Area
+        # 3. Answers Editor Area (left side)
         ctk.CTkLabel(
-            self.frame_answers_approval,
+            self.frame_approval_left,
             text="Answers (replaces [...] in template):",
             font=ctk.CTkFont(size=12, weight="bold")
         ).pack(anchor="w", padx=8, pady=(2, 2))
 
-        ans_editor_frame = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
-        ans_editor_frame.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+        ans_editor_frame = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
+        ans_editor_frame.pack(fill="both", expand=True, padx=8, pady=(0, 6))
 
-        self.txt_approval_answers = ctk.CTkTextbox(ans_editor_frame, height=130, wrap="word")
+        self.txt_approval_answers = ctk.CTkTextbox(ans_editor_frame, wrap="word")
         self.txt_approval_answers.pack(side="left", fill="both", expand=True)
         self.txt_approval_answers.bind("<KeyRelease>", lambda e: self._update_approval_preview())
 
-        # Vertical 90-degree rotated button stack on the right of the textbox
         ans_btn_stack = ctk.CTkFrame(ans_editor_frame, fg_color="transparent")
         ans_btn_stack.pack(side="right", fill="y", padx=(6, 0))
 
-        ctk.CTkButton(
+        # Blank button with distinct slate/zinc color
+        self.btn_ans_blank = ctk.CTkButton(
             ans_btn_stack,
             text="Blank",
             width=65,
-            height=28,
-            fg_color=theme.CARD_BORDER,
-            hover_color=theme.CARD_BG,
+            height=30,
+            fg_color="#475569",
+            hover_color="#334155",
             command=self._on_ans_blank_clicked
-        ).pack(pady=2)
+        )
+        self.btn_ans_blank.pack(pady=3)
 
-        ctk.CTkButton(
+        self.btn_ans_note = ctk.CTkButton(
             ans_btn_stack,
             text="Note",
             width=65,
-            height=28,
+            height=30,
             fg_color=theme.ACCENT_BLUE,
             hover_color=theme.ACCENT_BLUE_HOVER,
             command=self._on_ans_note_clicked
-        ).pack(pady=2)
+        )
+        self.btn_ans_note.pack(pady=3)
 
-        ctk.CTkButton(
+        self.btn_ans_ai = ctk.CTkButton(
             ans_btn_stack,
             text="AI",
             width=65,
-            height=28,
+            height=30,
             fg_color="#8b5cf6",
             hover_color="#7c3aed",
             command=self._on_ans_ai_clicked
-        ).pack(pady=2)
+        )
+        self.btn_ans_ai.pack(pady=3)
 
-        # 4. Clipboard & Message Preview Row
-        clip_row = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
-        clip_row.pack(fill="x", padx=8, pady=2)
-        ctk.CTkButton(
+        # 4. View Listing & Notes + Copy to Clipboard Row
+        clip_row = ctk.CTkFrame(self.frame_approval_left, fg_color="transparent")
+        clip_row.pack(fill="x", padx=8, pady=(2, 6))
+
+        self.btn_view_listing = ctk.CTkButton(
             clip_row,
-            text="Copy listing & note to clipboard",
-            width=240,
-            height=28,
-            fg_color=theme.CARD_BORDER,
-            hover_color=theme.CARD_BG,
+            text="View listing and notes",
+            font=ctk.CTkFont(weight="bold"),
+            height=32,
+            fg_color="#0d9488",
+            hover_color="#0f766e",
+            state="disabled",
+            command=self._open_listing_and_notes_dialog
+        )
+        self.btn_view_listing.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        self.btn_copy_listing = ctk.CTkButton(
+            clip_row,
+            text="Copy to clipboard",
+            font=ctk.CTkFont(weight="bold"),
+            height=32,
+            fg_color="#4f46e5",
+            hover_color="#4338ca",
+            state="disabled",
             command=self._on_copy_listing_to_clipboard
-        ).pack(side="left")
+        )
+        self.btn_copy_listing.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Right Side (inside logger_right_box): Full Message Preview (Stretched) + Send/Skip Buttons
+        self.frame_approval_right = ctk.CTkFrame(self.logger_right_box, fg_color="transparent")
+        self.frame_answers_approval = self.frame_approval_right  # Alias for backward compatibility
+
+        preview_header_row = ctk.CTkFrame(self.frame_approval_right, fg_color="transparent")
+        preview_header_row.pack(fill="x", padx=8, pady=(4, 4))
 
         ctk.CTkLabel(
-            self.frame_answers_approval,
+            preview_header_row,
             text="Full message preview:",
-            font=ctk.CTkFont(size=11),
-            text_color=theme.TEXT_MUTED
-        ).pack(anchor="w", padx=8, pady=(4, 0))
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#cbd5e1"
+        ).pack(side="left")
 
         self.txt_approval_preview = ctk.CTkTextbox(
-            self.frame_answers_approval,
-            height=65,
+            self.frame_approval_right,
             wrap="word",
             fg_color="#181c24",
-            text_color="#94a3b8"
+            text_color="#e2e8f0"
         )
-        self.txt_approval_preview.pack(fill="x", padx=8, pady=(2, 6))
+        self.txt_approval_preview.pack(fill="both", expand=True, padx=8, pady=(2, 6))
         self.txt_approval_preview.configure(state="disabled")
 
         # 5. Bottom Action Buttons
-        approval_btn_row = ctk.CTkFrame(self.frame_answers_approval, fg_color="transparent")
+        approval_btn_row = ctk.CTkFrame(self.frame_approval_right, fg_color="transparent")
         approval_btn_row.pack(fill="x", padx=8, pady=(2, 6))
 
         self.btn_send_answer = ctk.CTkButton(
             approval_btn_row,
             text="Send answer & Log",
-            font=ctk.CTkFont(weight="bold"),
+            font=ctk.CTkFont(weight="bold", size=13),
             fg_color=theme.ACCENT_GREEN,
             hover_color=theme.ACCENT_GREEN_HOVER,
             state="disabled",
-            height=32,
+            height=34,
             command=self._on_approve_send_clicked
         )
-        self.btn_send_answer.pack(side="left", padx=(0, 6))
+        self.btn_send_answer.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
         self.btn_skip_answer = ctk.CTkButton(
             approval_btn_row,
             text="Skip answer & Log",
-            font=ctk.CTkFont(weight="bold"),
+            font=ctk.CTkFont(weight="bold", size=13),
             fg_color="#d97706",
             hover_color="#b45309",
             state="disabled",
-            height=32,
+            height=34,
             command=self._on_approve_skip_clicked
         )
-        self.btn_skip_answer.pack(side="left")
+        self.btn_skip_answer.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         # Resume banner frame (shown if an unfinished logging run is detected)
         self.frame_resume_logging = ctk.CTkFrame(
@@ -773,27 +857,47 @@ class UltimateApp:
         self.btn_log_stop.pack(side="left", padx=6)
 
     def _on_logger_mode_changed(self, mode_val: str):
-        # Manage right box visibility (hidden in Send concepts mode unless send_answers is checked)
-        if hasattr(self, "logger_right_box") and hasattr(self, "frame_gc_codes_input") and hasattr(self, "frame_answers_approval"):
+        # Manage top checkbox visibility
+        if hasattr(self, "chk_send_answers"):
+            if mode_val == "Send concepts":
+                self.chk_send_answers.pack(side="left", padx=20)
+            else:
+                self.chk_send_answers.pack_forget()
+
+        # Manage right box visibility and approval frames
+        if hasattr(self, "logger_right_box") and hasattr(self, "frame_gc_codes_input") and hasattr(self, "frame_approval_left"):
             if mode_val == "Send concepts":
                 self.frame_gc_codes_input.pack_forget()
                 if self.var_send_answers.get():
-                    self.frame_answers_approval.pack(fill="both", expand=True)
+                    self.frame_concepts_info.grid_remove()
+                    self.logger_left_box.grid_rowconfigure(0, weight=1)
+                    self.logger_left_box.grid_rowconfigure(3, weight=0)
+                    self.frame_approval_left.grid(row=0, column=0, columnspan=2, rowspan=5, sticky="nsew")
+                    self.frame_approval_right.pack(fill="both", expand=True)
                     self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
                 else:
-                    self.frame_answers_approval.pack_forget()
+                    self.frame_approval_left.grid_remove()
+                    self.frame_approval_right.pack_forget()
                     self.logger_right_box.pack_forget()
+                    self.logger_left_box.grid_rowconfigure(0, weight=0)
+                    self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
             else:
-                self.frame_answers_approval.pack_forget()
+                self.frame_approval_left.grid_remove()
+                self.frame_approval_right.pack_forget()
                 self.frame_gc_codes_input.pack(fill="both", expand=True)
                 self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+                self.logger_left_box.grid_rowconfigure(0, weight=0)
+                self.logger_left_box.grid_rowconfigure(3, weight=1)
 
         if hasattr(self, "frame_concepts_info"):
-            self.frame_concepts_info.grid_remove()
+            if mode_val != "Send concepts" or self.var_send_answers.get():
+                self.frame_concepts_info.grid_remove()
 
         if mode_val == "Create logs":
             self.logger_mode_var.set("CREATE")
             self.frame_delete_info.grid_remove()
+            if hasattr(self, "frame_approval_left"):
+                self.frame_approval_left.grid_remove()
             self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
             self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
             self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
@@ -823,6 +927,8 @@ class UltimateApp:
         elif mode_val == "Edit logs":
             self.logger_mode_var.set("EDIT")
             self.frame_delete_info.grid_remove()
+            if hasattr(self, "frame_approval_left"):
+                self.frame_approval_left.grid_remove()
             self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
             self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
             self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
@@ -850,6 +956,8 @@ class UltimateApp:
 
         elif mode_val == "Delete logs":
             self.logger_mode_var.set("DELETE")
+            if hasattr(self, "frame_approval_left"):
+                self.frame_approval_left.grid_remove()
             self.lbl_log_type.grid_remove()
             self.combo_log_type.grid_remove()
             self.lbl_log_date.grid_remove()
@@ -879,7 +987,15 @@ class UltimateApp:
             self.lbl_log_msg.grid_remove()
             self.txt_log_message.grid_remove()
 
-            self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
+            if self.var_send_answers.get():
+                self.frame_concepts_info.grid_remove()
+                self.logger_left_box.grid_rowconfigure(0, weight=1)
+                self.logger_left_box.grid_rowconfigure(3, weight=0)
+                self.frame_approval_left.grid(row=0, column=0, columnspan=2, rowspan=5, sticky="nsew")
+            else:
+                self.frame_approval_left.grid_remove()
+                self.logger_left_box.grid_rowconfigure(0, weight=0)
+                self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
 
             self.btn_log_start.configure(
                 text="▶ Start sending concepts",
@@ -3748,11 +3864,18 @@ class UltimateApp:
         if self.logger_mode_var.get() == "CONCEPTS":
             if val:
                 self.frame_gc_codes_input.pack_forget()
-                self.frame_answers_approval.pack(fill="both", expand=True)
+                self.frame_concepts_info.grid_remove()
+                self.logger_left_box.grid_rowconfigure(0, weight=1)
+                self.logger_left_box.grid_rowconfigure(3, weight=0)
+                self.frame_approval_left.grid(row=0, column=0, columnspan=2, rowspan=5, sticky="nsew")
+                self.frame_approval_right.pack(fill="both", expand=True)
                 self.logger_right_box.pack(side="right", fill="both", expand=True, padx=5, pady=5)
             else:
-                self.frame_answers_approval.pack_forget()
+                self.frame_approval_left.grid_remove()
+                self.frame_approval_right.pack_forget()
                 self.logger_right_box.pack_forget()
+                self.logger_left_box.grid_rowconfigure(0, weight=0)
+                self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="nsew")
 
     def _on_approval_template_changed(self, choice: str):
         self.config.selected_answer_template = choice
@@ -3792,7 +3915,7 @@ class UltimateApp:
         self.btn_send_answer.configure(state="disabled")
         self.btn_skip_answer.configure(state="disabled")
 
-        tmpl_name = self.combo_approval_template.get() if hasattr(self, "combo_approval_template") else ""
+        tmpl_name = self.combo_answer_templates.get() if hasattr(self, "combo_answer_templates") else ""
         matched_tmpl = next((t for t in self.config.answer_templates if t.name == tmpl_name), None)
         active_ai_prompt_name = matched_tmpl.ai_prompt if (matched_tmpl and matched_tmpl.ai_prompt) else None
 
@@ -3825,6 +3948,130 @@ class UltimateApp:
             self.root.after(0, done)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _open_current_cache_in_browser(self):
+        gccode = self._current_approval_data.get("gccode", "")
+        if gccode:
+            webbrowser.open(f"https://coord.info/{gccode}")
+
+    def _open_current_owner_in_browser(self):
+        owner_guid = self._current_approval_data.get("owner_guid", "")
+        owner_name = self._current_approval_data.get("owner_name", "")
+        if owner_guid:
+            webbrowser.open(f"https://www.geocaching.com/p/?guid={owner_guid}")
+        elif owner_name:
+            webbrowser.open(f"https://www.geocaching.com/p/?u={urllib.parse.quote(owner_name)}")
+
+    def _open_listing_and_notes_dialog(self):
+        payload = getattr(self, "_current_approval_data", {})
+        if not payload:
+            return
+
+        gccode = payload.get("gccode", "")
+        name = payload.get("name", "")
+        ctype = payload.get("cache_type", "")
+        owner = payload.get("owner_name", "")
+        owner_guid = payload.get("owner_guid", "")
+        note = (payload.get("note") or "").strip()
+        listing = (payload.get("listing") or "").strip()
+
+        dlg = ctk.CTkToplevel(self.root)
+        dlg.title(f"Listing & Notes: {gccode} - {name}")
+        dlg.geometry("820x680")
+        dlg.minsize(600, 450)
+
+        # Bring to front
+        dlg.lift()
+        dlg.focus_force()
+
+        hand_cur = "pointinghand" if sys.platform == "darwin" else "hand2"
+
+        # Header frame
+        hdr = ctk.CTkFrame(dlg, fg_color="#182234", corner_radius=0)
+        hdr.pack(fill="x")
+
+        hdr_row1 = ctk.CTkFrame(hdr, fg_color="transparent")
+        hdr_row1.pack(fill="x", padx=16, pady=(10, 2))
+
+        lbl_gc = ctk.CTkLabel(
+            hdr_row1,
+            text=gccode,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#38bdf8",
+            cursor=hand_cur
+        )
+        lbl_gc.pack(side="left")
+        lbl_gc.bind("<Button-1>", lambda e: webbrowser.open(f"https://coord.info/{gccode}"))
+        lbl_gc.bind("<Enter>", lambda e: lbl_gc.configure(text_color="#7dd3fc"))
+        lbl_gc.bind("<Leave>", lambda e: lbl_gc.configure(text_color="#38bdf8"))
+
+        ctk.CTkLabel(
+            hdr_row1,
+            text=f": {name} ({ctype})",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#f1f5f9"
+        ).pack(side="left", padx=(2, 0))
+
+        hdr_row2 = ctk.CTkFrame(hdr, fg_color="transparent")
+        hdr_row2.pack(fill="x", padx=16, pady=(0, 10))
+
+        ctk.CTkLabel(hdr_row2, text="Owner: ", font=ctk.CTkFont(size=12), text_color=theme.TEXT_MUTED).pack(side="left")
+        lbl_own = ctk.CTkLabel(
+            hdr_row2,
+            text=owner or "Unknown",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#38bdf8",
+            cursor=hand_cur
+        )
+        lbl_own.pack(side="left")
+        if owner_guid:
+            lbl_own.bind("<Button-1>", lambda e: webbrowser.open(f"https://www.geocaching.com/p/?guid={owner_guid}"))
+        elif owner:
+            lbl_own.bind("<Button-1>", lambda e: webbrowser.open(f"https://www.geocaching.com/p/?u={urllib.parse.quote(owner)}"))
+        lbl_own.bind("<Enter>", lambda e: lbl_own.configure(text_color="#7dd3fc"))
+        lbl_own.bind("<Leave>", lambda e: lbl_own.configure(text_color="#38bdf8"))
+
+        content_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        content_frame.pack(fill="both", expand=True, padx=14, pady=10)
+
+        # Personal Note section
+        note_box = ctk.CTkFrame(content_frame, fg_color="#1e2430", corner_radius=6, border_width=1, border_color="#334155")
+        note_box.pack(fill="x", pady=(0, 10))
+
+        note_hdr = ctk.CTkFrame(note_box, fg_color="transparent")
+        note_hdr.pack(fill="x", padx=10, pady=(6, 2))
+        ctk.CTkLabel(note_hdr, text="Personal Note (poznámka):", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8").pack(side="left")
+
+        txt_note = ctk.CTkTextbox(note_box, height=90, wrap="word", fg_color="#12161f")
+        txt_note.pack(fill="x", padx=10, pady=(0, 8))
+        txt_note.insert("1.0", note if note else "(No personal note recorded)")
+        txt_note.configure(state="disabled")
+
+        # Listing Text section
+        list_box = ctk.CTkFrame(content_frame, fg_color="#1e2430", corner_radius=6, border_width=1, border_color="#334155")
+        list_box.pack(fill="both", expand=True)
+
+        list_hdr = ctk.CTkFrame(list_box, fg_color="transparent")
+        list_hdr.pack(fill="x", padx=10, pady=(6, 2))
+        ctk.CTkLabel(list_hdr, text="Listing Text (popis keše a otázky):", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8").pack(side="left")
+
+        txt_listing = ctk.CTkTextbox(list_box, wrap="word", fg_color="#12161f")
+        txt_listing.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+        txt_listing.insert("1.0", listing if listing else "(No listing text available)")
+        txt_listing.configure(state="disabled")
+
+        # Bottom buttons row
+        dlg_btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        dlg_btn_row.pack(fill="x", padx=14, pady=(4, 12))
+
+        def copy_all():
+            full_text = f"=== {gccode}: {name} ===\n\n[Personal Note]:\n{note}\n\n[Listing]:\n{listing}"
+            self.root.clipboard_clear()
+            self.root.clipboard_append(full_text)
+            self.log(f"Copied listing and note for {gccode} to clipboard.", "info")
+
+        ctk.CTkButton(dlg_btn_row, text="Copy all to clipboard", fg_color="#4f46e5", hover_color="#4338ca", height=32, command=copy_all).pack(side="left")
+        ctk.CTkButton(dlg_btn_row, text="Close", fg_color=theme.CARD_BORDER, hover_color=theme.CARD_BG, width=90, height=32, command=dlg.destroy).pack(side="right")
 
     def _on_copy_listing_to_clipboard(self):
         gccode = self._current_approval_data.get("gccode", "")
@@ -3876,14 +4123,36 @@ class UltimateApp:
         self._approval_result = ("SEND", answers, tmpl_name)
         self.btn_send_answer.configure(state="disabled")
         self.btn_skip_answer.configure(state="disabled")
-        self.lbl_approval_cache_info.configure(text="⏳ Processing...")
+        if hasattr(self, "btn_view_listing"):
+            self.btn_view_listing.configure(state="disabled")
+        if hasattr(self, "btn_copy_listing"):
+            self.btn_copy_listing.configure(state="disabled")
+        if hasattr(self, "lbl_appr_gccode"):
+            self.lbl_appr_gccode.pack_forget()
+        if hasattr(self, "lbl_appr_title"):
+            self.lbl_appr_title.configure(text="Processing...", text_color="#94a3b8")
+        if hasattr(self, "lbl_appr_owner_label"):
+            self.lbl_appr_owner_label.pack_forget()
+        if hasattr(self, "lbl_appr_owner_val"):
+            self.lbl_appr_owner_val.pack_forget()
         self._approval_event.set()
 
     def _on_approve_skip_clicked(self):
         self._approval_result = ("SKIP", "", "")
         self.btn_send_answer.configure(state="disabled")
         self.btn_skip_answer.configure(state="disabled")
-        self.lbl_approval_cache_info.configure(text="⏳ Processing...")
+        if hasattr(self, "btn_view_listing"):
+            self.btn_view_listing.configure(state="disabled")
+        if hasattr(self, "btn_copy_listing"):
+            self.btn_copy_listing.configure(state="disabled")
+        if hasattr(self, "lbl_appr_gccode"):
+            self.lbl_appr_gccode.pack_forget()
+        if hasattr(self, "lbl_appr_title"):
+            self.lbl_appr_title.configure(text="Processing...", text_color="#94a3b8")
+        if hasattr(self, "lbl_appr_owner_label"):
+            self.lbl_appr_owner_label.pack_forget()
+        if hasattr(self, "lbl_appr_owner_val"):
+            self.lbl_appr_owner_val.pack_forget()
         self._approval_event.set()
 
     def _show_approval_request(self, payload: Dict[str, Any]):
@@ -3892,13 +4161,30 @@ class UltimateApp:
         name = payload.get("name", "")
         ctype = payload.get("cache_type", "")
         owner = payload.get("owner_name", "")
-        self.lbl_approval_cache_info.configure(
-            text=f"📍 {gccode}: {name} ({ctype})\n👤 Owner: {owner or 'Unknown'}"
-        )
 
+        # Header card updates (clean, clickable, no emojis)
+        if hasattr(self, "lbl_appr_gccode"):
+            self.lbl_appr_gccode.configure(text=gccode)
+            self.lbl_appr_gccode.pack(side="left")
+        if hasattr(self, "lbl_appr_title"):
+            self.lbl_appr_title.configure(text=f": {name} ({ctype})", text_color="#f1f5f9")
+        if hasattr(self, "lbl_appr_owner_label"):
+            self.lbl_appr_owner_label.pack(side="left")
+        if hasattr(self, "lbl_appr_owner_val"):
+            self.lbl_appr_owner_val.configure(text=owner or "Unknown")
+            self.lbl_appr_owner_val.pack(side="left")
+
+        # Enable View listing & note, and Copy to clipboard buttons
+        if hasattr(self, "btn_view_listing"):
+            self.btn_view_listing.configure(state="normal")
+        if hasattr(self, "btn_copy_listing"):
+            self.btn_copy_listing.configure(state="normal")
+
+        # Populate answers
         source = (self.config.default_answer_source or "note").lower()
         note_ans = payload.get("extracted_answers", "")
 
+        self.txt_approval_answers.configure(state="normal")
         self.txt_approval_answers.delete("1.0", "end")
         if source == "blank":
             pass
@@ -3912,9 +4198,23 @@ class UltimateApp:
         self.btn_skip_answer.configure(state="normal")
 
     def _reset_approval_panel_to_idle(self):
-        if hasattr(self, "lbl_approval_cache_info"):
-            self.lbl_approval_cache_info.configure(text="⏳ Waiting for EarthCache / Virtual Cache concepts...")
+        if hasattr(self, "lbl_appr_gccode"):
+            self.lbl_appr_gccode.pack_forget()
+        if hasattr(self, "lbl_appr_title"):
+            self.lbl_appr_title.configure(
+                text="Waiting for EarthCache / Virtual Cache concepts...",
+                text_color="#94a3b8"
+            )
+        if hasattr(self, "lbl_appr_owner_label"):
+            self.lbl_appr_owner_label.pack_forget()
+        if hasattr(self, "lbl_appr_owner_val"):
+            self.lbl_appr_owner_val.pack_forget()
+        if hasattr(self, "btn_view_listing"):
+            self.btn_view_listing.configure(state="disabled")
+        if hasattr(self, "btn_copy_listing"):
+            self.btn_copy_listing.configure(state="disabled")
         if hasattr(self, "txt_approval_answers"):
+            self.txt_approval_answers.configure(state="normal")
             self.txt_approval_answers.delete("1.0", "end")
         if hasattr(self, "txt_approval_preview"):
             self.txt_approval_preview.configure(state="normal")
