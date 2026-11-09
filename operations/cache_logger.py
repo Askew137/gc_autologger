@@ -749,8 +749,10 @@ class CacheLogger:
             prefix = f"[{idx}/{total}] {gc_code} ({ref_code})"
 
             # Check if this cache is an EarthCache or Virtual Cache requiring answers
-            is_earth = self.client.is_earth_cache(gc_code)
-            is_virtual = self.client.is_virtual_cache(gc_code)
+            type_id = draft.get("geocacheTypeId")
+            type_name = str(draft.get("geocacheTypeName", "")).lower()
+            is_earth = (type_id == 137) or ("earth" in type_name) or self.client.is_earth_cache(gc_code)
+            is_virtual = (type_id in [4, 11, 12]) or ("virtual" in type_name) or self.client.is_virtual_cache(gc_code)
 
             if send_answers and (is_earth or is_virtual) and on_ask_answer:
                 cache_type_name = "EarthCache" if is_earth else "Virtual Cache"

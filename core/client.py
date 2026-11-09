@@ -1566,13 +1566,21 @@ class GeocachingClient:
 
                 for it in items:
                     ref = it.get("referenceCode") or ""
-                    gccode = (it.get("geocacheCode") or "").upper()
-                    date_str = it.get("loggedDate") or ""
+                    geocache = it.get("geocache") or {}
+                    gccode = (geocache.get("referenceCode") or it.get("geocacheCode") or "").upper()
+                    date_str = it.get("dateLoggedGeocacheTime") or it.get("dateLoggedUtc") or it.get("loggedDate") or ""
+
                     log_type_info = it.get("geocacheLogType") or {}
-                    log_type_id = log_type_info.get("id") if isinstance(log_type_info, dict) else it.get("logType")
-                    log_type_name = log_type_info.get("name") if isinstance(log_type_info, dict) else str(log_type_id or "Log")
-                    note = it.get("note") or ""
-                    cache_name = it.get("geocacheName") or gccode
+                    log_type_id = it.get("logTypeId") or (log_type_info.get("id") if isinstance(log_type_info, dict) else it.get("logType"))
+                    log_type_name = log_type_info.get("name") if isinstance(log_type_info, dict) else ""
+                    if not log_type_name:
+                        log_type_name = "Found it" if log_type_id == 2 else ("Didn't find it" if log_type_id == 3 else "Write note")
+
+                    note = it.get("note") or it.get("notePreview") or ""
+                    cache_name = geocache.get("name") or it.get("geocacheName") or gccode
+                    cache_type_info = geocache.get("geocacheType") or {}
+                    cache_type_id = cache_type_info.get("id") if isinstance(cache_type_info, dict) else None
+                    cache_type_name = cache_type_info.get("name") if isinstance(cache_type_info, dict) else ""
 
                     if ref and gccode:
                         all_drafts.append({
@@ -1583,6 +1591,8 @@ class GeocachingClient:
                             "logType": log_type_name,
                             "logTypeId": log_type_id,
                             "note": note,
+                            "geocacheTypeId": cache_type_id,
+                            "geocacheTypeName": cache_type_name,
                             "useFavoritePoint": it.get("useFavoritePoint", False)
                         })
 
