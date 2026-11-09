@@ -1126,8 +1126,8 @@ class UltimateApp:
 
         ctk.CTkLabel(
             geodeep_sec,
-            text="Vyberte pole z Geodeep poznámek, která se mají nahrát do osobní poznámky na webu (bez mezery před dvojtečkou).\n"
-                 "💡 Nezaškrtnutí žádného pole zkopíruje poznámky v původním znění beze změn.",
+            text="Select which fields from Geodeep notes to include in personal notes uploaded to the web.\n"
+                 "💡 Leaving all options unchecked copies notes as-is without any modifications.",
             font=ctk.CTkFont(size=11),
             text_color=theme.TEXT_MUTED,
             justify="left"
@@ -1139,7 +1139,7 @@ class UltimateApp:
         self.var_geodeep_date = ctk.BooleanVar(value=self.config.geodeep_notes.include_date)
         self.chk_geodeep_date = ctk.CTkCheckBox(
             gd_content,
-            text="Vloženo (Vloženo: YYYY-MM-DD)",
+            text="Date added",
             font=ctk.CTkFont(size=13),
             variable=self.var_geodeep_date,
             command=self._on_toggle_geodeep_notes
@@ -1149,7 +1149,7 @@ class UltimateApp:
         self.var_geodeep_drive_in = ctk.BooleanVar(value=self.config.geodeep_notes.include_drive_in)
         self.chk_geodeep_drive_in = ctk.CTkCheckBox(
             gd_content,
-            text="Drive in (Drive in: ANO/NE)",
+            text="Drive in",
             font=ctk.CTkFont(size=13),
             variable=self.var_geodeep_drive_in,
             command=self._on_toggle_geodeep_notes
@@ -1159,7 +1159,7 @@ class UltimateApp:
         self.var_geodeep_verified = ctk.BooleanVar(value=self.config.geodeep_notes.include_verified)
         self.chk_geodeep_verified = ctk.CTkCheckBox(
             gd_content,
-            text="Ověřeno (Ověřeno: ...)",
+            text="Verified",
             font=ctk.CTkFont(size=13),
             variable=self.var_geodeep_verified,
             command=self._on_toggle_geodeep_notes
@@ -1169,7 +1169,7 @@ class UltimateApp:
         self.var_geodeep_notes = ctk.BooleanVar(value=self.config.geodeep_notes.include_notes)
         self.chk_geodeep_notes = ctk.CTkCheckBox(
             gd_content,
-            text="Poznámky (Poznámky: text)",
+            text="Notes",
             font=ctk.CTkFont(size=13),
             variable=self.var_geodeep_notes,
             command=self._on_toggle_geodeep_notes
