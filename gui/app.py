@@ -877,6 +877,54 @@ class UltimateApp:
         )
         self.btn_log_stop.pack(side="left", padx=6)
 
+    def _force_window_redraw(self):
+        """Force complete window layout recalculation and macOS Cocoa repaint."""
+        if not hasattr(self, "root") or not self.root:
+            return
+
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+
+        # 1. Programmatic 1px geometry nudge to trigger full window layout recalculation
+        try:
+            if self.root.state() == "normal":
+                w = self.root.winfo_width()
+                h = self.root.winfo_height()
+                if w > 20 and h > 20:
+                    self.root.geometry(f"{w}x{h+1}")
+                    self.root.update_idletasks()
+                    self.root.geometry(f"{w}x{h}")
+                    self.root.update_idletasks()
+        except Exception:
+            pass
+
+        # 2. Trigger configure event
+        try:
+            w = self.root.winfo_width()
+            h = self.root.winfo_height()
+            self.root.event_generate("<Configure>", width=w, height=h)
+        except Exception:
+            pass
+
+        # 3. Native macOS Cocoa invalidation and display flush
+        if sys.platform == "darwin":
+            try:
+                from AppKit import NSApplication
+                for win in NSApplication.sharedApplication().windows():
+                    cv = win.contentView()
+                    if cv:
+                        cv.setNeedsDisplay_(True)
+                    win.display()
+            except Exception:
+                pass
+
+        try:
+            self.root.update()
+        except Exception:
+            pass
+
     def _update_drafts_approval_visibility(self, enabled: bool):
         """Update visibility of approval panels in Send drafts mode."""
         if enabled:
@@ -904,11 +952,7 @@ class UltimateApp:
             if hasattr(self, "logger_right_box"):
                 self.logger_right_box.grid_forget()
 
-        if hasattr(self, "root"):
-            try:
-                self.root.update_idletasks()
-            except Exception:
-                pass
+        self._force_window_redraw()
 
     def _on_logger_mode_changed(self, mode_val: str):
         # Remove drafts specific widgets from left box by default
@@ -1034,6 +1078,8 @@ class UltimateApp:
                 fg_color=theme.ACCENT_GREEN,
                 hover_color=theme.ACCENT_GREEN_HOVER
             )
+
+        self._force_window_redraw()
     # --------------------------------------------------------------------------
     # Tab 3: Copy User
     # --------------------------------------------------------------------------
