@@ -878,15 +878,6 @@ class UltimateApp:
         self.btn_log_stop.pack(side="left", padx=6)
 
     def _on_logger_mode_changed(self, mode_val: str):
-        # Manage right box content: frame_gc_codes_input vs frame_approval_right
-        if hasattr(self, "frame_gc_codes_input") and hasattr(self, "frame_approval_right"):
-            if mode_val in ("Send drafts", "Send concepts"):
-                self.frame_gc_codes_input.pack_forget()
-                self.frame_approval_right.pack(fill="both", expand=True)
-            else:
-                self.frame_approval_right.pack_forget()
-                self.frame_gc_codes_input.pack(fill="both", expand=True)
-
         # Remove drafts specific widgets from left box by default
         if hasattr(self, "frame_concepts_info"):
             self.frame_concepts_info.grid_remove()
@@ -896,6 +887,17 @@ class UltimateApp:
             self.frame_approval_left.grid_remove()
         if hasattr(self, "logger_left_box"):
             self.logger_left_box.grid_rowconfigure(2, weight=0)
+
+        # In standard logging modes, ensure both columns are placed and GC codes container is packed
+        if mode_val not in ("Send drafts", "Send concepts"):
+            if hasattr(self, "frame_approval_right"):
+                self.frame_approval_right.pack_forget()
+            if hasattr(self, "frame_gc_codes_input"):
+                self.frame_gc_codes_input.pack(fill="both", expand=True)
+            if hasattr(self, "logger_left_box"):
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
+            if hasattr(self, "logger_right_box"):
+                self.logger_right_box.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
         if mode_val == "Create logs":
             self.logger_mode_var.set("CREATE")
@@ -990,13 +992,25 @@ class UltimateApp:
             # Show the ONE checkbox directly under the blue frame
             self.chk_send_answers.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 6), sticky="w")
 
-            # Show answers approval panel under checkbox if send_answers is checked
+            # Show answers approval panel under checkbox ONLY if send_answers is checked
             if self.var_send_answers.get():
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
                 self.logger_left_box.grid_rowconfigure(2, weight=1)
                 self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
+                if hasattr(self, "frame_gc_codes_input"):
+                    self.frame_gc_codes_input.pack_forget()
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack(fill="both", expand=True)
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
             else:
-                self.logger_left_box.grid_rowconfigure(2, weight=0)
                 self.frame_approval_left.grid_remove()
+                self.logger_left_box.grid_rowconfigure(2, weight=0)
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack_forget()
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid_remove()
+                self.logger_left_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
             self.btn_log_start.configure(
                 text="▶ Start sending drafts",
@@ -1195,6 +1209,10 @@ class UltimateApp:
                     console_box = getattr(self.txt_console, "_textbox", self.txt_console)
                     if str(w).startswith(str(console_box)):
                         return False
+                if w is not None and hasattr(self, "ai_thinking_budget_slider"):
+                    slider_canvas = getattr(self.ai_thinking_budget_slider, "_canvas", self.ai_thinking_budget_slider)
+                    if str(w).startswith(str(slider_canvas)) or w == self.ai_thinking_budget_slider:
+                        return False
                 return True
             except Exception:
                 return False
@@ -1286,9 +1304,6 @@ class UltimateApp:
 
         self.new_acc_pwd = ctk.CTkEntry(add_frame, placeholder_text="Password (optional)", show="*", width=160)
         self.new_acc_pwd.pack(side="left", padx=4)
-
-        self.new_acc_default = ctk.CTkCheckBox(add_frame, text="Set as default", width=120)
-        self.new_acc_default.pack(side="left", padx=8)
 
         ctk.CTkButton(add_frame, text="+ Add account", width=110, command=self._on_add_account).pack(side="left", padx=4)
 
@@ -1574,6 +1589,56 @@ class UltimateApp:
         self.lbl_thinking_budget = ctk.CTkLabel(tb_box, text=self._format_thinking_budget(init_budget), font=ctk.CTkFont(size=12))
         self.lbl_thinking_budget.pack(side="left", padx=10)
         self._update_thinking_budget_slider_limits()
+
+        # Dampened mouse wheel handler for thinking budget slider
+        self._last_slider_wheel_time = 0.0
+        self._last_slider_wheel_dir = 0
+
+        def _on_slider_mousewheel(event):
+            try:
+                if self.ai_thinking_budget_slider.cget("state") == "disabled":
+                    return "break"
+                raw_delta = getattr(event, "delta", 0)
+                if not raw_delta and getattr(event, "num", None) in (4, 5):
+                    direction = 1 if event.num == 4 else -1
+                else:
+                    val = int(raw_delta)
+                    if abs(val) > 1000:
+                        raw = val & 0xFFFFFFFF
+                        delta_y = raw & 0xFFFF
+                        if delta_y >= 0x8000:
+                            delta_y -= 0x10000
+                        direction = -1 if delta_y > 0 else (1 if delta_y < 0 else 0)
+                    else:
+                        direction = 1 if val > 0 else (-1 if val < 0 else 0)
+
+                if direction == 0:
+                    return "break"
+
+                import time
+                now = time.time()
+                time_diff = now - self._last_slider_wheel_time
+                if direction != self._last_slider_wheel_dir or time_diff > 0.07:
+                    self._last_slider_wheel_time = now
+                    self._last_slider_wheel_dir = direction
+
+                    cur_tokens = int(round(self.ai_thinking_budget_slider.get() / 128.0) * 128)
+                    max_tokens = int(self.ai_thinking_budget_slider.cget("to"))
+                    min_tokens = int(self.ai_thinking_budget_slider.cget("from_"))
+                    new_tokens = max(min_tokens, min(max_tokens, cur_tokens + (128 * direction)))
+
+                    self.ai_thinking_budget_slider.set(new_tokens)
+                    self._on_thinking_budget_changed(new_tokens)
+            except Exception:
+                pass
+            return "break"
+
+        self.ai_thinking_budget_slider.bind("<MouseWheel>", _on_slider_mousewheel)
+        self.ai_thinking_budget_slider._canvas.bind("<MouseWheel>", _on_slider_mousewheel)
+        self.ai_thinking_budget_slider.bind("<Button-4>", _on_slider_mousewheel)
+        self.ai_thinking_budget_slider._canvas.bind("<Button-4>", _on_slider_mousewheel)
+        self.ai_thinking_budget_slider.bind("<Button-5>", _on_slider_mousewheel)
+        self.ai_thinking_budget_slider._canvas.bind("<Button-5>", _on_slider_mousewheel)
 
         # System Prompts management
         ctk.CTkLabel(ai_sec, text="AI System Prompts (Multilingual / Custom):", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12, 4))
@@ -3002,14 +3067,13 @@ class UltimateApp:
     def _on_add_account(self):
         u = self.new_acc_user.get().strip()
         p = self.new_acc_pwd.get().strip()
-        d = bool(self.new_acc_default.get())
         if not u:
             messagebox.showwarning("Account", "Username is required.", parent=self.root)
             return
-        self.config_mgr.add_or_update_account(u, p, is_default=d)
+        is_first = len(self.config.accounts) == 0
+        self.config_mgr.add_or_update_account(u, p, is_default=is_first)
         self.new_acc_user.delete(0, "end")
         self.new_acc_pwd.delete(0, "end")
-        self.new_acc_default.deselect()
         self._refresh_accounts_view()
         self._refresh_header_combo()
         self._refresh_copy_account_combo()
@@ -3864,11 +3928,23 @@ class UltimateApp:
         self.config_mgr.save()
         if self.logger_mode_var.get() in ("DRAFTS", "CONCEPTS"):
             if val:
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
                 self.logger_left_box.grid_rowconfigure(2, weight=1)
                 self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
+                if hasattr(self, "frame_gc_codes_input"):
+                    self.frame_gc_codes_input.pack_forget()
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack(fill="both", expand=True)
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
             else:
-                self.logger_left_box.grid_rowconfigure(2, weight=0)
                 self.frame_approval_left.grid_remove()
+                self.logger_left_box.grid_rowconfigure(2, weight=0)
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack_forget()
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid_remove()
+                self.logger_left_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
     def _on_approval_template_changed(self, choice: str):
         self.config.selected_answer_template = choice
