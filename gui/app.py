@@ -457,7 +457,8 @@ class UltimateApp:
         self.logger_mode_seg.set("Create logs")
         self.logger_mode_seg.pack(side="left")
 
-        log_grid = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
+        self.log_grid = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
+        log_grid = self.log_grid
         log_grid.pack(fill="both", expand=True, padx=8, pady=4)
         log_grid.grid_columnconfigure(0, weight=1, uniform="col")
         log_grid.grid_columnconfigure(1, weight=1, uniform="col")
@@ -877,6 +878,21 @@ class UltimateApp:
         )
         self.btn_log_stop.pack(side="left", padx=6)
 
+    def _redraw_widget_tree(self, widget):
+        """Recursively trigger _draw() on all CustomTkinter widgets in the tree."""
+        if hasattr(widget, "_draw"):
+            try:
+                widget._draw()
+            except Exception:
+                pass
+        if hasattr(widget, "winfo_children"):
+            try:
+                for child in widget.winfo_children():
+                    if hasattr(child, "winfo_ismapped") and child.winfo_ismapped():
+                        self._redraw_widget_tree(child)
+            except Exception:
+                pass
+
     def _force_window_redraw(self):
         """Force complete window layout recalculation and macOS Cocoa repaint."""
         if not hasattr(self, "root") or not self.root:
@@ -887,24 +903,22 @@ class UltimateApp:
         except Exception:
             pass
 
-        # 1. Programmatic 1px geometry nudge to trigger full window layout recalculation
+        # 1. Explicitly redraw tab and container canvases
+        if hasattr(self, "tab_logger"):
+            self._redraw_widget_tree(self.tab_logger)
+        elif hasattr(self, "tabview"):
+            self._redraw_widget_tree(self.tabview)
+
+        # 2. Programmatic 1px geometry nudge to trigger full window layout recalculation.
+        # Delaying restoring by 25ms ensures WindowServer and Cocoa actually process the geometry change
+        # and re-render the backing surface.
         try:
             if self.root.state() == "normal":
                 w = self.root.winfo_width()
                 h = self.root.winfo_height()
                 if w > 20 and h > 20:
                     self.root.geometry(f"{w}x{h+1}")
-                    self.root.update_idletasks()
-                    self.root.geometry(f"{w}x{h}")
-                    self.root.update_idletasks()
-        except Exception:
-            pass
-
-        # 2. Trigger configure event
-        try:
-            w = self.root.winfo_width()
-            h = self.root.winfo_height()
-            self.root.event_generate("<Configure>", width=w, height=h)
+                    self.root.after(25, lambda: self._restore_geometry(w, h))
         except Exception:
             pass
 
@@ -916,12 +930,32 @@ class UltimateApp:
                     cv = win.contentView()
                     if cv:
                         cv.setNeedsDisplay_(True)
-                    win.display()
+                    win.displayIfNeeded()
             except Exception:
                 pass
 
         try:
             self.root.update()
+        except Exception:
+            pass
+
+    def _restore_geometry(self, w: int, h: int):
+        try:
+            if hasattr(self, "root") and self.root and self.root.state() == "normal":
+                self.root.geometry(f"{w}x{h}")
+                self.root.update_idletasks()
+                if hasattr(self, "tab_logger"):
+                    self._redraw_widget_tree(self.tab_logger)
+                if sys.platform == "darwin":
+                    try:
+                        from AppKit import NSApplication
+                        for win in NSApplication.sharedApplication().windows():
+                            cv = win.contentView()
+                            if cv:
+                                cv.setNeedsDisplay_(True)
+                            win.displayIfNeeded()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -951,6 +985,17 @@ class UltimateApp:
                 self.frame_gc_codes_input.pack_forget()
             if hasattr(self, "logger_right_box"):
                 self.logger_right_box.grid_forget()
+
+        if hasattr(self, "logger_left_box") and hasattr(self.logger_left_box, "_draw"):
+            try:
+                self.logger_left_box._draw()
+            except Exception:
+                pass
+        if hasattr(self, "log_grid") and hasattr(self.log_grid, "_draw"):
+            try:
+                self.log_grid._draw()
+            except Exception:
+                pass
 
         self._force_window_redraw()
 
