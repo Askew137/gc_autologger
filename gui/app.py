@@ -1010,7 +1010,7 @@ class UltimateApp:
                     self.frame_approval_right.pack_forget()
                 if hasattr(self, "logger_right_box"):
                     self.logger_right_box.grid_remove()
-                self.logger_left_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
 
             self.btn_log_start.configure(
                 text="▶ Start sending drafts",
@@ -3947,7 +3947,7 @@ class UltimateApp:
                     self.frame_approval_right.pack_forget()
                 if hasattr(self, "logger_right_box"):
                     self.logger_right_box.grid_remove()
-                self.logger_left_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
 
     def _on_approval_template_changed(self, choice: str):
         self.config.selected_answer_template = choice
