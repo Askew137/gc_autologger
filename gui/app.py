@@ -1251,12 +1251,15 @@ class UltimateApp:
                         scroll._parent_canvas.yview_scroll(-delta_y, "units")
                     return
 
-                if sys.platform == "darwin":
-                    scroll_pixels = -int(val * 25)
-                elif sys.platform.startswith("win"):
-                    scroll_pixels = -int((val / 120) * 35)
+                # Physical mouse wheel: normalize 120-based or 1-based deltas
+                if abs(val) >= 60:
+                    notches = val / 120.0
                 else:
-                    scroll_pixels = -30 if val > 0 else 30
+                    notches = float(val)
+
+                # Clamp max notches per single event to prevent sudden huge jumps
+                notches = max(-5.0, min(5.0, notches))
+                scroll_pixels = -int(round(notches * 40))
 
                 if scroll_pixels != 0:
                     scroll._parent_canvas.yview_scroll(scroll_pixels, "units")
