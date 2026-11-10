@@ -457,8 +457,7 @@ class UltimateApp:
         self.logger_mode_seg.set("Create logs")
         self.logger_mode_seg.pack(side="left")
 
-        self.log_grid = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
-        log_grid = self.log_grid
+        log_grid = ctk.CTkFrame(self.tab_logger, fg_color="transparent")
         log_grid.pack(fill="both", expand=True, padx=8, pady=4)
         log_grid.grid_columnconfigure(0, weight=1, uniform="col")
         log_grid.grid_columnconfigure(1, weight=1, uniform="col")
@@ -878,135 +877,14 @@ class UltimateApp:
         )
         self.btn_log_stop.pack(side="left", padx=6)
 
-    def _redraw_widget_tree(self, widget):
-        """Recursively trigger _draw() on all CustomTkinter widgets in the tree."""
-        if hasattr(widget, "_draw"):
-            try:
-                widget._draw()
-            except Exception:
-                pass
-        if hasattr(widget, "winfo_children"):
-            try:
-                for child in widget.winfo_children():
-                    if hasattr(child, "winfo_ismapped") and child.winfo_ismapped():
-                        self._redraw_widget_tree(child)
-            except Exception:
-                pass
-
-    def _force_window_redraw(self):
-        """Force complete window layout recalculation and macOS Cocoa repaint."""
-        if not hasattr(self, "root") or not self.root:
-            return
-
-        try:
-            self.root.update_idletasks()
-        except Exception:
-            pass
-
-        # 1. Explicitly redraw tab and container canvases
-        if hasattr(self, "tab_logger"):
-            self._redraw_widget_tree(self.tab_logger)
-        elif hasattr(self, "tabview"):
-            self._redraw_widget_tree(self.tabview)
-
-        # 2. Programmatic 1px geometry nudge to trigger full window layout recalculation.
-        # Delaying restoring by 25ms ensures WindowServer and Cocoa actually process the geometry change
-        # and re-render the backing surface.
-        try:
-            if self.root.state() == "normal":
-                w = self.root.winfo_width()
-                h = self.root.winfo_height()
-                if w > 20 and h > 20:
-                    self.root.geometry(f"{w}x{h+1}")
-                    self.root.after(25, lambda: self._restore_geometry(w, h))
-        except Exception:
-            pass
-
-        # 3. Native macOS Cocoa invalidation and display flush
-        if sys.platform == "darwin":
-            try:
-                from AppKit import NSApplication
-                for win in NSApplication.sharedApplication().windows():
-                    cv = win.contentView()
-                    if cv:
-                        cv.setNeedsDisplay_(True)
-                    win.displayIfNeeded()
-            except Exception:
-                pass
-
-        try:
-            self.root.update()
-        except Exception:
-            pass
-
-    def _restore_geometry(self, w: int, h: int):
-        try:
-            if hasattr(self, "root") and self.root and self.root.state() == "normal":
-                self.root.geometry(f"{w}x{h}")
-                self.root.update_idletasks()
-                if hasattr(self, "tab_logger"):
-                    self._redraw_widget_tree(self.tab_logger)
-                if sys.platform == "darwin":
-                    try:
-                        from AppKit import NSApplication
-                        for win in NSApplication.sharedApplication().windows():
-                            cv = win.contentView()
-                            if cv:
-                                cv.setNeedsDisplay_(True)
-                            win.displayIfNeeded()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-    def _update_drafts_approval_visibility(self, enabled: bool):
-        """Update visibility of approval panels in Send drafts mode."""
-        if enabled:
-            if hasattr(self, "logger_left_box"):
-                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
-                self.logger_left_box.grid_rowconfigure(2, weight=1)
-            if hasattr(self, "frame_approval_left"):
-                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
-            if hasattr(self, "frame_gc_codes_input"):
-                self.frame_gc_codes_input.pack_forget()
-            if hasattr(self, "frame_approval_right"):
-                self.frame_approval_right.pack(fill="both", expand=True)
-            if hasattr(self, "logger_right_box"):
-                self.logger_right_box.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
-        else:
-            if hasattr(self, "frame_approval_left"):
-                self.frame_approval_left.grid_forget()
-            if hasattr(self, "logger_left_box"):
-                self.logger_left_box.grid_rowconfigure(2, weight=0)
-                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
-            if hasattr(self, "frame_approval_right"):
-                self.frame_approval_right.pack_forget()
-            if hasattr(self, "frame_gc_codes_input"):
-                self.frame_gc_codes_input.pack_forget()
-            if hasattr(self, "logger_right_box"):
-                self.logger_right_box.grid_forget()
-
-        if hasattr(self, "logger_left_box") and hasattr(self.logger_left_box, "_draw"):
-            try:
-                self.logger_left_box._draw()
-            except Exception:
-                pass
-        if hasattr(self, "log_grid") and hasattr(self.log_grid, "_draw"):
-            try:
-                self.log_grid._draw()
-            except Exception:
-                pass
-
-        self._force_window_redraw()
-
     def _on_logger_mode_changed(self, mode_val: str):
         # Remove drafts specific widgets from left box by default
         if hasattr(self, "frame_concepts_info"):
-            self.frame_concepts_info.grid_forget()
+            self.frame_concepts_info.grid_remove()
         if hasattr(self, "chk_send_answers"):
-            self.chk_send_answers.grid_forget()
+            self.chk_send_answers.grid_remove()
         if hasattr(self, "frame_approval_left"):
-            self.frame_approval_left.grid_forget()
+            self.frame_approval_left.grid_remove()
         if hasattr(self, "logger_left_box"):
             self.logger_left_box.grid_rowconfigure(2, weight=0)
 
@@ -1023,7 +901,7 @@ class UltimateApp:
 
         if mode_val == "Create logs":
             self.logger_mode_var.set("CREATE")
-            self.frame_delete_info.grid_forget()
+            self.frame_delete_info.grid_remove()
             self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
             self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
             self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
@@ -1052,7 +930,7 @@ class UltimateApp:
 
         elif mode_val == "Edit logs":
             self.logger_mode_var.set("EDIT")
-            self.frame_delete_info.grid_forget()
+            self.frame_delete_info.grid_remove()
             self.lbl_log_type.grid(row=0, column=0, padx=10, pady=8, sticky="w")
             self.combo_log_type.grid(row=0, column=1, padx=10, pady=8, sticky="w")
             self.lbl_log_date.grid(row=1, column=0, padx=10, pady=8, sticky="w")
@@ -1080,14 +958,14 @@ class UltimateApp:
 
         elif mode_val == "Delete logs":
             self.logger_mode_var.set("DELETE")
-            self.lbl_log_type.grid_forget()
-            self.combo_log_type.grid_forget()
-            self.lbl_log_date.grid_forget()
-            self.date_box.grid_forget()
-            self.lbl_log_tmpl.grid_forget()
-            self.combo_template.grid_forget()
-            self.lbl_log_msg.grid_forget()
-            self.txt_log_message.grid_forget()
+            self.lbl_log_type.grid_remove()
+            self.combo_log_type.grid_remove()
+            self.lbl_log_date.grid_remove()
+            self.date_box.grid_remove()
+            self.lbl_log_tmpl.grid_remove()
+            self.combo_template.grid_remove()
+            self.lbl_log_msg.grid_remove()
+            self.txt_log_message.grid_remove()
 
             self.frame_delete_info.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 6), sticky="ew")
 
@@ -1099,15 +977,15 @@ class UltimateApp:
 
         elif mode_val in ("Send drafts", "Send concepts"):
             self.logger_mode_var.set("DRAFTS")
-            self.frame_delete_info.grid_forget()
-            self.lbl_log_type.grid_forget()
-            self.combo_log_type.grid_forget()
-            self.lbl_log_date.grid_forget()
-            self.date_box.grid_forget()
-            self.lbl_log_tmpl.grid_forget()
-            self.combo_template.grid_forget()
-            self.lbl_log_msg.grid_forget()
-            self.txt_log_message.grid_forget()
+            self.frame_delete_info.grid_remove()
+            self.lbl_log_type.grid_remove()
+            self.combo_log_type.grid_remove()
+            self.lbl_log_date.grid_remove()
+            self.date_box.grid_remove()
+            self.lbl_log_tmpl.grid_remove()
+            self.combo_template.grid_remove()
+            self.lbl_log_msg.grid_remove()
+            self.txt_log_message.grid_remove()
 
             # Show drafts info box at top of left side
             self.frame_concepts_info.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 6), sticky="ew")
@@ -1115,16 +993,30 @@ class UltimateApp:
             self.chk_send_answers.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 6), sticky="w")
 
             # Show answers approval panel under checkbox ONLY if send_answers is checked
-            val = bool(self.chk_send_answers.get()) if hasattr(self, "chk_send_answers") else bool(self.var_send_answers.get())
-            self._update_drafts_approval_visibility(val)
+            if self.var_send_answers.get():
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
+                self.logger_left_box.grid_rowconfigure(2, weight=1)
+                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
+                if hasattr(self, "frame_gc_codes_input"):
+                    self.frame_gc_codes_input.pack_forget()
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack(fill="both", expand=True)
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+            else:
+                self.frame_approval_left.grid_remove()
+                self.logger_left_box.grid_rowconfigure(2, weight=0)
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack_forget()
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid_remove()
+                self.logger_left_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
             self.btn_log_start.configure(
                 text="▶ Start sending drafts",
                 fg_color=theme.ACCENT_GREEN,
                 hover_color=theme.ACCENT_GREEN_HOVER
             )
-
-        self._force_window_redraw()
     # --------------------------------------------------------------------------
     # Tab 3: Copy User
     # --------------------------------------------------------------------------
@@ -3011,8 +2903,8 @@ class UltimateApp:
             self.entry_copy_start_date.insert(0, older_d.strftime("%d-%m-%Y"))
         else:
             self.lbl_copy_main_date.configure(text="Date (DD-MM-YYYY):")
-            self.lbl_copy_start_date.grid_forget()
-            self.start_date_box.grid_forget()
+            self.lbl_copy_start_date.grid_remove()
+            self.start_date_box.grid_remove()
 
     def _toggle_password_mode(self):
         if self.var_password_mode.get():
@@ -3024,8 +2916,8 @@ class UltimateApp:
                 self.entry_copy_pwd.delete(0, "end")
                 self.entry_copy_pwd.insert(0, acc.password)
         else:
-            self.lbl_copy_pwd.grid_forget()
-            self.entry_copy_pwd.grid_forget()
+            self.lbl_copy_pwd.grid_remove()
+            self.entry_copy_pwd.grid_remove()
             self.entry_copy_pwd.delete(0, "end")
 
     def _on_copy_account_selected(self, choice: str):
@@ -4034,17 +3926,28 @@ class UltimateApp:
     # --------------------------------------------------------------------------
 
     def _on_toggle_send_answers(self):
-        val = bool(self.chk_send_answers.get()) if hasattr(self, "chk_send_answers") else bool(self.var_send_answers.get())
-        if hasattr(self, "var_send_answers"):
-            self.var_send_answers.set(val)
+        val = self.var_send_answers.get()
         self.config.send_answers = val
         self.config_mgr.save()
-        is_drafts = (
-            (hasattr(self, "logger_mode_var") and self.logger_mode_var.get() in ("DRAFTS", "CONCEPTS")) or
-            (hasattr(self, "logger_mode_seg") and self.logger_mode_seg.get() in ("Send drafts", "Send concepts"))
-        )
-        if is_drafts:
-            self._update_drafts_approval_visibility(val)
+        if self.logger_mode_var.get() in ("DRAFTS", "CONCEPTS"):
+            if val:
+                self.logger_left_box.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=5, pady=5)
+                self.logger_left_box.grid_rowconfigure(2, weight=1)
+                self.frame_approval_left.grid(row=2, column=0, columnspan=2, padx=0, pady=(2, 0), sticky="nsew")
+                if hasattr(self, "frame_gc_codes_input"):
+                    self.frame_gc_codes_input.pack_forget()
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack(fill="both", expand=True)
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+            else:
+                self.frame_approval_left.grid_remove()
+                self.logger_left_box.grid_rowconfigure(2, weight=0)
+                if hasattr(self, "frame_approval_right"):
+                    self.frame_approval_right.pack_forget()
+                if hasattr(self, "logger_right_box"):
+                    self.logger_right_box.grid_remove()
+                self.logger_left_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
     def _on_approval_template_changed(self, choice: str):
         self.config.selected_answer_template = choice
