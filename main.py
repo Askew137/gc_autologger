@@ -29,7 +29,14 @@ if sys.platform.startswith("win"):
         pass
 
 
+from core.version import __version__ as APP_VERSION
+
+
 def main():
+    if "--version" in sys.argv or "-v" in sys.argv:
+        print(f"GC Autologger v{APP_VERSION}")
+        return
+
     if "--cli" in sys.argv:
         from cli import run_cli
         run_cli()

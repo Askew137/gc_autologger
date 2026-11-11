@@ -74,5 +74,8 @@
   "gui": {
     "theme": "dark",
     "color_theme": "blue"
+  },
+  "updates": {
+    "auto_check": true
   }
 }

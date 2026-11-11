@@ -93,6 +93,11 @@ class FilterConfig:
 
 
 @dataclass
+class UpdatesConfig:
+    auto_check: bool = True  # Check for updates automatically on startup
+
+
+@dataclass
 class GuiConfig:
     theme: str = "dark"
     color_theme: str = "blue"
@@ -212,6 +217,15 @@ class AppConfig:
     send_answers: bool = False
     default_answer_source: str = "note"  # "blank", "note", "ai"
     ai: AiConfig = field(default_factory=AiConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
+
+    @property
+    def auto_update(self) -> bool:
+        return self.updates.auto_check
+
+    @auto_update.setter
+    def auto_update(self, val: bool) -> None:
+        self.updates.auto_check = bool(val)
 
 
 class ConfigManager:
@@ -269,7 +283,8 @@ class ConfigManager:
                 "selected_answer_template": self.config.selected_answer_template,
                 "send_answers": self.config.send_answers,
                 "default_answer_source": self.config.default_answer_source,
-                "ai": asdict(self.config.ai)
+                "ai": asdict(self.config.ai),
+                "updates": asdict(self.config.updates)
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(raw_dict, f, indent=2, ensure_ascii=False)
@@ -438,6 +453,11 @@ class ConfigManager:
             system_prompt=prompts[0].prompt if prompts else ""
         )
 
+        # Updates
+        raw_updates = data.get("updates", {})
+        auto_chk = bool(raw_updates.get("auto_check", data.get("auto_update", True)))
+        updates_cfg = UpdatesConfig(auto_check=auto_chk)
+
         return AppConfig(
             accounts=accounts,
             folder_path=str(data.get("folder_path", "")),
@@ -451,7 +471,8 @@ class ConfigManager:
             selected_answer_template=str(data.get("selected_answer_template", "Default")),
             send_answers=bool(data.get("send_answers", False)),
             default_answer_source=str(data.get("default_answer_source", "note")),
-            ai=ai_cfg
+            ai=ai_cfg,
+            updates=updates_cfg
         )
 
     def _migrate_legacy_config(self, legacy_path: str) -> None:

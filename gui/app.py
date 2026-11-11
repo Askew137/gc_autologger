@@ -36,6 +36,9 @@ from core.ai_service import AiService
 from operations.coordinate_uploader import CoordinateUploader
 from operations.cache_logger import CacheLogger, LOG_TYPE_MAP, LOG_TYPE_NAMES, extract_answers_from_note, format_answer_message
 from operations.user_copy import UserLogCopier
+from core.version import __version__ as APP_VERSION
+from core import updater
+from core.updater import ReleaseInfo
 import gui.theme as theme
 
 
@@ -55,9 +58,18 @@ class UltimateApp:
         ctk.set_default_color_theme(self.config.gui.color_theme)
 
         self.root = ctk.CTk()
-        self.root.title("GC Autologger")
+        self.root.title(f"GC Autologger v{APP_VERSION}")
         self.root.geometry("1050x780")
         self.root.minsize(920, 680)
+
+        # Auto-updater state
+        updater.cleanup_update_artifacts()
+        self._latest_release: Optional[ReleaseInfo] = None
+        self._is_checking_updates = False
+        self._is_installing_update = False
+        self.var_auto_update = ctk.BooleanVar(
+            value=getattr(self.config, "updates", None).auto_check if getattr(self.config, "updates", None) else True
+        )
 
         # Core components
         self.client: Optional[GeocachingClient] = None
@@ -101,6 +113,11 @@ class UltimateApp:
         self._set_app_icon()
         self._init_client_session()
         self._check_active_checkpoint()
+
+        # Automatically check for updates on startup if enabled
+        if getattr(self.config, "updates", None) and self.config.updates.auto_check:
+            self.root.after(2000, lambda: self._start_background_update_check(silent=True))
+
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_window)
 
     def _on_close_window(self):
@@ -232,13 +249,22 @@ class UltimateApp:
         self._check_active_checkpoint()
 
     def _build_header(self):
-        # Logo / Title
-        title_lbl = ctk.CTkLabel(
-            self.header_frame,
+        # Logo / Title with version tag
+        title_box = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        title_box.pack(side="left", padx=18, pady=12)
+
+        ctk.CTkLabel(
+            title_box,
             text="GC Autologger",
             font=ctk.CTkFont(size=18, weight="bold")
-        )
-        title_lbl.pack(side="left", padx=18, pady=12)
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            title_box,
+            text=f"v{APP_VERSION}",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#94a3b8"
+        ).pack(side="left", padx=(6, 0), pady=(4, 0))
 
         # Connection status badge
         self.status_badge = ctk.CTkLabel(
@@ -1287,6 +1313,148 @@ class UltimateApp:
         self.root.bind_all("<MouseWheel>", _on_mouse_wheel, add=True)
         self.root.bind_all("<Button-4>", _on_btn4, add=True)
         self.root.bind_all("<Button-5>", _on_btn5, add=True)
+
+        # 0. Application Updates Section (at the very top of Settings)
+        self.updates_sec = ctk.CTkFrame(scroll)
+        self.updates_sec.pack(fill="x", pady=6, padx=6)
+
+        hdr_frame = ctk.CTkFrame(self.updates_sec, fg_color="transparent")
+        hdr_frame.pack(fill="x", padx=12, pady=(10, 4))
+
+        ctk.CTkLabel(
+            hdr_frame,
+            text="Application updates",
+            font=ctk.CTkFont(weight="bold", size=14)
+        ).pack(side="left")
+
+        self.lbl_current_version_badge = ctk.CTkLabel(
+            hdr_frame,
+            text=f"Current version: v{APP_VERSION}",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#1e293b",
+            text_color="#94a3b8",
+            corner_radius=4,
+            padx=8,
+            pady=2
+        )
+        self.lbl_current_version_badge.pack(side="right")
+
+        updates_content = ctk.CTkFrame(self.updates_sec, fg_color="transparent")
+        updates_content.pack(fill="x", padx=12, pady=(4, 12))
+
+        # Checkbox for auto-update vs manual
+        self.chk_auto_update = ctk.CTkCheckBox(
+            updates_content,
+            text="Check for updates automatically on startup",
+            font=ctk.CTkFont(size=13),
+            variable=self.var_auto_update,
+            command=self._on_toggle_auto_update
+        )
+        self.chk_auto_update.pack(anchor="w", padx=4, pady=(2, 6))
+
+        # Action row: Manual check button + status
+        check_row = ctk.CTkFrame(updates_content, fg_color="transparent")
+        check_row.pack(fill="x", padx=4, pady=4)
+
+        self.btn_check_updates = ctk.CTkButton(
+            check_row,
+            text="🔍 Check for updates now",
+            width=190,
+            height=32,
+            command=self._on_check_updates_clicked
+        )
+        self.btn_check_updates.pack(side="left", padx=(0, 10))
+
+        self.lbl_update_status = ctk.CTkLabel(
+            check_row,
+            text="Status: Not checked yet",
+            font=ctk.CTkFont(size=12),
+            text_color=theme.TEXT_MUTED
+        )
+        self.lbl_update_status.pack(side="left", fill="x", expand=True, anchor="w")
+
+        # Dynamic Card for Available Update (hidden initially)
+        self.frame_update_available = ctk.CTkFrame(
+            updates_content,
+            fg_color="#132338",
+            border_width=1,
+            border_color="#0284c7",
+            corner_radius=6
+        )
+
+        up_card_pad = ctk.CTkFrame(self.frame_update_available, fg_color="transparent")
+        up_card_pad.pack(fill="x", padx=14, pady=12)
+
+        self.lbl_update_title = ctk.CTkLabel(
+            up_card_pad,
+            text="✨ New version available!",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#38bdf8",
+            anchor="w"
+        )
+        self.lbl_update_title.pack(anchor="w", pady=(0, 4))
+
+        self.lbl_update_details = ctk.CTkLabel(
+            up_card_pad,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color="#bae6fd",
+            anchor="w",
+            justify="left"
+        )
+        self.lbl_update_details.pack(anchor="w", pady=(0, 8))
+
+        # Action buttons inside update card
+        btn_action_row = ctk.CTkFrame(up_card_pad, fg_color="transparent")
+        btn_action_row.pack(fill="x", pady=(2, 6))
+
+        self.btn_install_update = ctk.CTkButton(
+            btn_action_row,
+            text="⬇️ Download and install update",
+            font=ctk.CTkFont(weight="bold"),
+            height=34,
+            fg_color=theme.ACCENT_GREEN,
+            hover_color=theme.ACCENT_GREEN_HOVER,
+            command=self._on_install_update_clicked
+        )
+        self.btn_install_update.pack(side="left", padx=(0, 8))
+
+        self.btn_view_release_web = ctk.CTkButton(
+            btn_action_row,
+            text="🌐 Release notes on GitHub",
+            height=34,
+            fg_color="#475569",
+            hover_color="#334155",
+            command=self._open_release_notes_url
+        )
+        self.btn_view_release_web.pack(side="left", padx=(0, 8))
+
+        self.btn_restart_app = ctk.CTkButton(
+            btn_action_row,
+            text="🔄 Restart application now",
+            font=ctk.CTkFont(weight="bold"),
+            height=34,
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            command=self._on_restart_app_clicked
+        )
+        # Not packed yet, packed when install finishes
+
+        # Download Progress Bar & Status (hidden until download starts)
+        self.frame_update_progress = ctk.CTkFrame(up_card_pad, fg_color="transparent")
+
+        self.lbl_update_progress = ctk.CTkLabel(
+            self.frame_update_progress,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color="#e2e8f0",
+            anchor="w"
+        )
+        self.lbl_update_progress.pack(anchor="w", pady=(2, 4))
+
+        self.progress_bar_update = ctk.CTkProgressBar(self.frame_update_progress, height=10)
+        self.progress_bar_update.set(0)
+        self.progress_bar_update.pack(fill="x", pady=2)
 
         # 1. Accounts Section
         acc_sec = ctk.CTkFrame(scroll)
@@ -3062,6 +3230,138 @@ class UltimateApp:
                 self.root.after(0, lambda: self.log(f"Error fetching ignored caches: {e}", "error"))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # --------------------------------------------------------------------------
+    # Application Auto-Updater Handlers
+    # --------------------------------------------------------------------------
+
+    def _on_toggle_auto_update(self):
+        val = bool(self.var_auto_update.get())
+        if hasattr(self.config, "updates"):
+            self.config.updates.auto_check = val
+        self.config_mgr.save()
+
+    def _start_background_update_check(self, silent: bool = True):
+        if self._is_checking_updates or self._is_installing_update:
+            return
+        self._is_checking_updates = True
+        if not silent and hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.configure(state="disabled", text="Checking GitHub...")
+            self.lbl_update_status.configure(text="Connecting to GitHub...", text_color=theme.TEXT_MUTED)
+
+        def _worker():
+            info, err = updater.check_for_updates(APP_VERSION)
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._handle_update_check_result(info, err, silent))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_check_updates_clicked(self):
+        self._start_background_update_check(silent=False)
+
+    def _handle_update_check_result(self, info: Optional[ReleaseInfo], err: Optional[str], silent: bool):
+        self._is_checking_updates = False
+        if hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.configure(state="normal", text="🔍 Check for updates now")
+
+        if err:
+            if not silent and hasattr(self, "lbl_update_status"):
+                self.lbl_update_status.configure(text=f"⚠️ {err}", text_color=theme.ACCENT_RED)
+            return
+
+        if not info:
+            if not silent and hasattr(self, "lbl_update_status"):
+                self.lbl_update_status.configure(text="⚠️ No release info found on GitHub.", text_color=theme.ACCENT_RED)
+            return
+
+        self._latest_release = info
+
+        if info.is_newer:
+            if hasattr(self, "lbl_update_status"):
+                self.lbl_update_status.configure(
+                    text=f"✨ Update available: v{info.version} (released {info.published_at})",
+                    text_color="#38bdf8"
+                )
+
+            if hasattr(self, "frame_update_available"):
+                self.lbl_update_title.configure(text=f"✨ New version available: v{info.version} ({info.title})")
+                details_text = f"Released on: {info.published_at}\n\n"
+                if info.body:
+                    preview_lines = info.body.strip().split("\n")[:4]
+                    details_text += "\n".join(preview_lines)
+                    if len(info.body.strip().split("\n")) > 4:
+                        details_text += "\n..."
+                self.lbl_update_details.configure(text=details_text)
+
+                self.btn_install_update.pack(side="left", padx=(0, 8))
+                self.btn_install_update.configure(state="normal", text="⬇️ Download and install update")
+                self.btn_restart_app.pack_forget()
+                self.frame_update_progress.pack_forget()
+                self.frame_update_available.pack(fill="x", padx=4, pady=(8, 4))
+
+            self.log(f"✨ A newer version of GC Autologger (v{info.version}) is available. Check '⚙️ Config & accounts' to update.", "info")
+        else:
+            if hasattr(self, "lbl_update_status"):
+                self.lbl_update_status.configure(
+                    text=f"✓ Application is up to date (v{APP_VERSION}).",
+                    text_color=theme.ACCENT_GREEN
+                )
+            if hasattr(self, "frame_update_available"):
+                self.frame_update_available.pack_forget()
+
+    def _open_release_notes_url(self):
+        if self._latest_release and self._latest_release.html_url:
+            webbrowser.open(self._latest_release.html_url)
+        else:
+            webbrowser.open(f"https://github.com/{updater.GITHUB_REPO}/releases")
+
+    def _on_install_update_clicked(self):
+        if not self._latest_release or self._is_installing_update:
+            return
+        self._is_installing_update = True
+        self.btn_install_update.configure(state="disabled", text="Preparing...")
+        self.frame_update_progress.pack(fill="x", pady=(8, 2))
+        self.progress_bar_update.set(0)
+        self.lbl_update_progress.configure(text="Starting download from GitHub...", text_color="#e2e8f0")
+
+        def _progress_cb(pct: float, msg: str):
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._update_install_progress(pct, msg))
+
+        def _worker():
+            success, msg = updater.perform_update(self._latest_release, progress_callback=_progress_cb)
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._handle_install_complete(success, msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_install_progress(self, pct: float, msg: str):
+        if hasattr(self, "progress_bar_update"):
+            self.progress_bar_update.set(max(0.0, min(1.0, pct / 100.0)))
+        if hasattr(self, "lbl_update_progress"):
+            self.lbl_update_progress.configure(text=msg)
+
+    def _handle_install_complete(self, success: bool, msg: str):
+        self._is_installing_update = False
+        if success:
+            if hasattr(self, "lbl_update_progress"):
+                self.lbl_update_progress.configure(text=f"✅ {msg}", text_color="#4ade80")
+            if hasattr(self, "progress_bar_update"):
+                self.progress_bar_update.set(1.0)
+            if hasattr(self, "btn_install_update"):
+                self.btn_install_update.pack_forget()
+            if hasattr(self, "btn_restart_app"):
+                self.btn_restart_app.pack(side="left", padx=(0, 8))
+            self.log(f"{msg}", "success")
+        else:
+            if hasattr(self, "lbl_update_progress"):
+                self.lbl_update_progress.configure(text=f"❌ {msg}", text_color=theme.ACCENT_RED)
+            if hasattr(self, "btn_install_update"):
+                self.btn_install_update.configure(state="normal", text="⬇️ Retry update")
+            self.log(f"{msg}", "error")
+
+    def _on_restart_app_clicked(self):
+        updater.restart_application()
 
     # --------------------------------------------------------------------------
     # Settings / Config Tab Handlers
