@@ -4,23 +4,98 @@ Handles loading, updating, migrating, and saving settings to config.json.
 Provides full backwards compatibility with legacy InputData.json.
 """
 
+from __future__ import annotations
+
 import os
 import sys
+import time
 import json
 import shutil
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Any
 
 
+_CACHED_BASE_DIR: Optional[str] = None
+
+
+def _is_dir_writable(path: str) -> bool:
+    """Test if a directory is writable by attempting to create and remove a probe file."""
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        return False
+
+    test_file = os.path.join(path, f".write_test_{os.getpid()}_{int(time.time() * 1000)}.tmp")
+    try:
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+
 def get_base_dir() -> str:
     """
     Get the persistent directory for storing user data (config.json, session_cookies.json, runs/).
-    When packaged as a PyInstaller executable, returns the folder containing the .exe binary.
-    When running in development, returns the repository root directory.
+    - In portable mode: If the executable directory (or development repository root) is writable,
+      user data is kept directly alongside the application.
+    - In installed/system mode (e.g. C:\\Program Files\\... or read-only locations):
+      User data is safely placed into the OS user profile:
+        - Windows: %APPDATA%\\GC Autologger
+        - macOS:   ~/Library/Application Support/GC Autologger
+        - Linux:   $XDG_CONFIG_HOME/gc_autologger or ~/.config/gc_autologger
     """
+    global _CACHED_BASE_DIR
+    if _CACHED_BASE_DIR and _is_dir_writable(_CACHED_BASE_DIR):
+        return _CACHED_BASE_DIR
+
+    # 1. Candidate directory (portable folder next to executable or repo root)
     if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidate_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        candidate_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # 2. If candidate directory is writable, use it (portable mode)
+    if _is_dir_writable(candidate_dir):
+        _CACHED_BASE_DIR = candidate_dir
+        return candidate_dir
+
+    # 3. Candidate directory is read-only (e.g. C:\Program Files\GC Autologger).
+    # Fallback to standard user application data directory.
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            user_dir = os.path.join(appdata, "GC Autologger")
+        else:
+            user_dir = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "GC Autologger")
+    elif sys.platform == "darwin":
+        user_dir = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "GC Autologger")
+    else:
+        xdg_config = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+        user_dir = os.path.join(xdg_config, "gc_autologger")
+
+    try:
+        os.makedirs(user_dir, exist_ok=True)
+    except Exception:
+        pass
+
+    # If an existing config.json or session_cookies.json exists in candidate_dir, copy to user_dir as initial seed
+    try:
+        src_cfg = os.path.join(candidate_dir, "config.json")
+        dst_cfg = os.path.join(user_dir, "config.json")
+        if os.path.exists(src_cfg) and not os.path.exists(dst_cfg):
+            shutil.copy2(src_cfg, dst_cfg)
+
+        src_cookies = os.path.join(candidate_dir, "session_cookies.json")
+        dst_cookies = os.path.join(user_dir, "session_cookies.json")
+        if os.path.exists(src_cookies) and not os.path.exists(dst_cookies):
+            shutil.copy2(src_cookies, dst_cookies)
+    except Exception:
+        pass
+
+    _CACHED_BASE_DIR = user_dir
+    return user_dir
 
 
 def get_bundle_dir() -> str:

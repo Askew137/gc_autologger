@@ -48,17 +48,59 @@ def main():
         app = UltimateApp()
         app.run()
     except ImportError as e:
-        print(f"\n[Notice] GUI dependencies not fully installed: {e}")
-        print("Falling back to interactive terminal mode (CLI).\n")
-        print("To enable the modern GUI, install dependencies:")
-        print("    pip install -r requirements.txt\n")
-        from cli import run_cli
-        run_cli()
+        has_stdin = False
+        try:
+            has_stdin = sys.stdin is not None and hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+        except Exception:
+            has_stdin = False
+
+        if has_stdin:
+            print(f"\n[Notice] GUI dependencies not fully installed: {e}")
+            print("Falling back to interactive terminal mode (CLI).\n")
+            print("To enable the modern GUI, install dependencies:")
+            print("    pip install -r requirements.txt\n")
+            from cli import run_cli
+            run_cli()
+        else:
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                root = tk.Tk()
+                root.withdraw()
+                messagebox.showerror(
+                    "GC Autologger - Error",
+                    f"GUI dependencies not fully installed:\n\n{e}"
+                )
+                root.destroy()
+            except Exception:
+                pass
+            raise
     except Exception as e:
-        print(f"\n[Notice] Could not initialize GUI: {e}")
-        print("Falling back to interactive terminal mode (CLI).\n")
-        from cli import run_cli
-        run_cli()
+        has_stdin = False
+        try:
+            has_stdin = sys.stdin is not None and hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+        except Exception:
+            has_stdin = False
+
+        if has_stdin:
+            print(f"\n[Notice] Could not initialize GUI: {e}")
+            print("Falling back to interactive terminal mode (CLI).\n")
+            from cli import run_cli
+            run_cli()
+        else:
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                root = tk.Tk()
+                root.withdraw()
+                messagebox.showerror(
+                    "GC Autologger - Fatal Error",
+                    f"Could not initialize application:\n\n{e}"
+                )
+                root.destroy()
+            except Exception:
+                pass
+            raise
 
 
 if __name__ == "__main__":

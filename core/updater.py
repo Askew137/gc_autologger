@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Callable
 
 from core.version import __version__ as APP_VERSION, GITHUB_REPO
-from core.config import get_base_dir
+from core.config import get_base_dir, _is_dir_writable
 
 
 @dataclass
@@ -259,6 +259,13 @@ def perform_update(
         _notify(5.0, "Preparing Windows executable update...")
         current_exe = os.path.abspath(sys.executable)
         exe_dir = os.path.dirname(current_exe)
+
+        if not _is_dir_writable(exe_dir):
+            return False, (
+                "Instalační složka aplikace (např. Program Files) vyžaduje administrátorská oprávnění k zápisu. "
+                "Pro aktualizaci spusťte aplikaci jako správce nebo stáhněte nový GC_Autologger.exe ručně z GitHubu."
+            )
+
         new_exe = os.path.join(exe_dir, "GC_Autologger.new.exe")
 
         download_url = release.exe_asset_url
