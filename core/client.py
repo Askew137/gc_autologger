@@ -5,13 +5,14 @@ Communicates directly via JSON, REST, and tRPC batch APIs with zero browser over
 Supports session persistence, auto-relogin, and Playwright fallback for initial CAPTCHA.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import json
 import time
 import html
-from typing import Optional, Dict, Any, Tuple, List
-from datetime import datetime
+from typing import Optional, Dict, Any, Tuple, List, Set
 
 try:
     import requests

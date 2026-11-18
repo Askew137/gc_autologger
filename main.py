@@ -54,6 +54,11 @@ def main():
         print("    pip install -r requirements.txt\n")
         from cli import run_cli
         run_cli()
+    except Exception as e:
+        print(f"\n[Notice] Could not initialize GUI: {e}")
+        print("Falling back to interactive terminal mode (CLI).\n")
+        from cli import run_cli
+        run_cli()
 
 
 if __name__ == "__main__":

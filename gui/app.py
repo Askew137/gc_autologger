@@ -4,12 +4,13 @@ Features modern dark styling, thread-safe asynchronous operations,
 interactive config/accounts manager, real-time logging console, and progress tracking.
 """
 
+from __future__ import annotations
+
 import os
 import sys
-import time
 import threading
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import webbrowser
 import urllib.parse
 
@@ -2483,9 +2484,10 @@ class UltimateApp:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Coordinates upload", res))
             except Exception as e:
-                self.log(f"Error during coordinate upload: {e}", "error")
+                err_msg = str(e)
+                self.log(f"Error during coordinate upload: {err_msg}", "error")
                 self.root.after(0, self._reset_controls)
-                self.root.after(0, lambda: self._on_operation_error("Coordinates upload", str(e)))
+                self.root.after(0, lambda m=err_msg: self._on_operation_error("Coordinates upload", m))
             finally:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, self._check_active_checkpoint)
@@ -2675,8 +2677,9 @@ class UltimateApp:
                         btn_refresh.configure(state="normal")
                     dialog.after(0, update_empty)
             except Exception as e:
-                def update_err():
-                    lbl_status.configure(text=f"Error loading lists: {e}", text_color=theme.TEXT_MUTED)
+                err_msg = str(e)
+                def update_err(msg=err_msg):
+                    lbl_status.configure(text=f"Error loading lists: {msg}", text_color=theme.TEXT_MUTED)
                     btn_refresh.configure(state="normal")
                 dialog.after(0, update_err)
 
@@ -2773,8 +2776,9 @@ class UltimateApp:
                         dialog.after(0, apply_ignore)
 
                 except Exception as e:
-                    def on_err():
-                        lbl_status.configure(text=f"Error fetching caches: {e}", text_color=theme.ACCENT_RED)
+                    err_msg = str(e)
+                    def on_err(msg=err_msg):
+                        lbl_status.configure(text=f"Error fetching caches: {msg}", text_color=theme.ACCENT_RED)
                         btn_fetch.configure(state="normal")
                         btn_cancel.configure(state="normal")
                     dialog.after(0, on_err)
@@ -2839,9 +2843,10 @@ class UltimateApp:
                     self.root.after(0, self._reset_controls)
                     self.root.after(0, lambda: self._on_operation_done("Send drafts", res))
                 except Exception as e:
-                    self.log(f"Error during sending drafts: {e}", "error")
+                    err_msg = str(e)
+                    self.log(f"Error during sending drafts: {err_msg}", "error")
                     self.root.after(0, self._reset_controls)
-                    self.root.after(0, lambda: self._on_operation_error("Send drafts", str(e)))
+                    self.root.after(0, lambda m=err_msg: self._on_operation_error("Send drafts", m))
                 finally:
                     self.root.after(0, self._reset_controls)
                     self.root.after(0, self._reset_approval_panel_to_idle)
@@ -2883,9 +2888,10 @@ class UltimateApp:
                     self.root.after(0, self._reset_controls)
                     self.root.after(0, lambda: self._on_operation_done("Bulk delete logs", res))
                 except Exception as e:
-                    self.log(f"Error during bulk delete logs: {e}", "error")
+                    err_msg = str(e)
+                    self.log(f"Error during bulk delete logs: {err_msg}", "error")
                     self.root.after(0, self._reset_controls)
-                    self.root.after(0, lambda: self._on_operation_error("Bulk delete logs", str(e)))
+                    self.root.after(0, lambda m=err_msg: self._on_operation_error("Bulk delete logs", m))
                 finally:
                     self.root.after(0, self._reset_controls)
 
@@ -2931,9 +2937,10 @@ class UltimateApp:
                     self.root.after(0, self._reset_controls)
                     self.root.after(0, lambda: self._on_operation_done("Bulk edit logs", res))
                 except Exception as e:
-                    self.log(f"Error during bulk edit logs: {e}", "error")
+                    err_msg = str(e)
+                    self.log(f"Error during bulk edit logs: {err_msg}", "error")
                     self.root.after(0, self._reset_controls)
-                    self.root.after(0, lambda: self._on_operation_error("Bulk edit logs", str(e)))
+                    self.root.after(0, lambda m=err_msg: self._on_operation_error("Bulk edit logs", m))
                 finally:
                     self.root.after(0, self._reset_controls)
 
@@ -2992,9 +2999,10 @@ class UltimateApp:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Bulk logging", res))
             except Exception as e:
-                self.log(f"Error during bulk logging: {e}", "error")
+                err_msg = str(e)
+                self.log(f"Error during bulk logging: {err_msg}", "error")
                 self.root.after(0, self._reset_controls)
-                self.root.after(0, lambda: self._on_operation_error("Bulk logging", str(e)))
+                self.root.after(0, lambda m=err_msg: self._on_operation_error("Bulk logging", m))
             finally:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, self._check_active_checkpoint)
@@ -3171,9 +3179,10 @@ class UltimateApp:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Ignore list", res))
             except Exception as e:
-                self.log(f"Error during ignore update: {e}", "error")
+                err_msg = str(e)
+                self.log(f"Error during ignore update: {err_msg}", "error")
                 self.root.after(0, self._reset_controls)
-                self.root.after(0, lambda: self._on_operation_error("Ignore list", str(e)))
+                self.root.after(0, lambda m=err_msg: self._on_operation_error("Ignore list", m))
             finally:
                 self.root.after(0, self._reset_controls)
 
@@ -3200,9 +3209,10 @@ class UltimateApp:
                 self.root.after(0, self._reset_controls)
                 self.root.after(0, lambda: self._on_operation_done("Un-ignore list", res))
             except Exception as e:
-                self.log(f"Error during un-ignore update: {e}", "error")
+                err_msg = str(e)
+                self.log(f"Error during un-ignore update: {err_msg}", "error")
                 self.root.after(0, self._reset_controls)
-                self.root.after(0, lambda: self._on_operation_error("Un-ignore list", str(e)))
+                self.root.after(0, lambda m=err_msg: self._on_operation_error("Un-ignore list", m))
             finally:
                 self.root.after(0, self._reset_controls)
 
@@ -3227,7 +3237,8 @@ class UltimateApp:
                 else:
                     self.root.after(0, lambda: self.log("No ignored caches found on your account.", "warning"))
             except Exception as e:
-                self.root.after(0, lambda: self.log(f"Error fetching ignored caches: {e}", "error"))
+                err_msg = str(e)
+                self.root.after(0, lambda m=err_msg: self.log(f"Error fetching ignored caches: {m}", "error"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -4742,12 +4753,12 @@ class UltimateApp:
         return clean
 
     @staticmethod
-    def _set_date_today(entry: ctk.CTkEntry):
+    def _set_date_today(entry: Any):
         entry.delete(0, "end")
         entry.insert(0, datetime.now().strftime("%d-%m-%Y"))
 
     @staticmethod
-    def _step_date(entry: ctk.CTkEntry, delta_days: int):
+    def _step_date(entry: Any, delta_days: int):
         clean = entry.get().strip()
         d = None
         for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
